@@ -1,0 +1,88 @@
+🕊️ Kindred — Privacy Policy
+
+Last Updated: 17 October 2026
+
+📌 In Short
+Your conversations are yours. We don't sell them. We don't read them. We don't use them for advertising. Period.
+
+1. Who We Are
+
+Kindred is an AI-powered supportive conversation space created and operated by Kindred. We are based in South Africa.
+
+Contact: kindred.hello@proton.me
+
+2. What Information We Collect
+
+We collect as little as possible:
+
+• What you type: The messages you share in conversation
+
+• Session data: Temporary information needed to keep the chat working properly
+
+• No account required: You do not need to give us your name, email address, or any personal details to use Kindred
+
+3. How We Use Your Information
+
+• ✅ Only to respond to you — your messages are processed to generate a helpful, thoughtful reply
+
+• ✅ Temporary processing only — your conversation is sent to our AI service provider solely to generate that response
+
+• ❌ We never sell your data — to anyone, ever
+
+• ❌ We never use your conversations for advertising — no exceptions
+
+• ❌ We never read your conversations — no human at Kindred accesses what you share
+
+Our AI Service Provider
+
+Currently, we use OpenAI's API to process messages. Please note:
+
+• OpenAI processes your message only to generate a response
+
+• We have confirmed that API inputs and outputs are NOT used for OpenAI's model training
+
+• Conversations are processed temporarily and are not permanently stored by us or by OpenAI beyond what is needed
+
+4. Your Rights (POPIA — South Africa)
+
+As a user in South Africa, you have rights under the Protection of Personal Information Act (POPIA):
+
+• ✅ Right to know what data we hold about you
+
+• ✅ Right to request deletion of your data
+
+• ✅ Right to withdraw consent — simply stop using the service
+
+• ✅ Right to complain — if you believe we've mishandled your data, you can report to the South African Information Regulator
+
+Because we don't require accounts or permanently store your personal details, simply closing or clearing your chat removes your conversation from your local session immediately
+
+5. Important Disclaimer
+
+Kindred is NOT a mental health service, medical provider, or crisis hotline. It is a supportive conversation space only:
+
+• ⚠️ Not a substitute for professional care — if you're struggling, please reach out to a qualified professional
+
+• 📞 South African support resources:
+
+◦ SADAG (Depression & Anxiety): 0800 567 567 / 0800 456 789
+
+◦ Lifeline South Africa: 0861 322 322
+
+◦ Suicide Crisis Line: 0800 567 567
+
+6. Children & Minors
+
+Kindred is intended for users aged 13 and older. We do not knowingly collect personal information from children.
+
+7. Changes to This Policy
+
+If we ever update how we handle data, those changes will be reflected here with an updated "Last Updated" date. Significant changes will be communicated clearly within the service.
+
+8. Questions
+
+Have questions about your privacy? We'd love to hear from you:
+
+📧 Email: kindred.hello@proton.me
+
+"Your thoughts are yours. Your words are yours. And here — they stay yours." 🕊️
