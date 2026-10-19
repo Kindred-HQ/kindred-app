@@ -328,6 +328,7 @@ if user_input:
         except Exception as exc:
             response_placeholder.empty()
             st.error(get_error_message(exc))
+            st.error(f"DEBUG: {type(exc).__name__}: {str(exc)}")
 
 
 # ==========================================
