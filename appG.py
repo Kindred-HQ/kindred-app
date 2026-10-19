@@ -410,5 +410,4 @@ st.caption(
     "Avoid sharing sensitive personal information. Children should use this app "
     "with guidance from a trusted adult."
 )
-DEBUG: ValidationException: An error occurred (ValidationException) when calling the ConverseStream operation: Invocation of model ID amazon.nova-lite-v1:0 with on-demand throughput isn’t supported. Retry your request with the ID or ARN of an inference profile that contains this model.
 
