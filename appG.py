@@ -3,6 +3,7 @@ import html
 import boto3
 import streamlit as st
 from botocore.exceptions import ClientError
+from streamlit_mic_recorder import speech_to_text
 
 
 # ==========================================
@@ -94,8 +95,6 @@ if "enable_voice" not in st.session_state:
     st.session_state.enable_voice = False
 if "voice_speed" not in st.session_state:
     st.session_state.voice_speed = 1.0
-if "voice_transcript" not in st.session_state:
-    st.session_state.voice_transcript = ""
 
 
 # ==========================================
@@ -258,115 +257,16 @@ for index, msg in enumerate(st.session_state.messages):
 # ==========================================
 # VOICE INPUT
 # ==========================================
-# Voice input uses a custom Streamlit component to capture speech.
-# The transcript is passed back via st.query_params and submitted as a message.
-voice_input_html = """
-<style>
-  #kindred-mic-wrap { display:flex; align-items:center; gap:10px; padding:4px 0 8px 0; }
-  #kindred-mic-btn {
-    background:#f0f2f6; border:1px solid #ccc; border-radius:20px;
-    padding:6px 18px; cursor:pointer; font-size:14px; color:#444;
-    transition: background 0.2s;
-  }
-  #kindred-mic-btn.listening { background:#ffe0e0; border-color:#f88; }
-  #kindred-transcript {
-    flex:1; padding:6px 12px; border:1px solid #ddd; border-radius:8px;
-    font-size:14px; color:#333; background:#fff; min-width:0;
-  }
-  #kindred-send-btn {
-    background:#5b8cff; color:white; border:none; border-radius:20px;
-    padding:6px 18px; cursor:pointer; font-size:14px;
-  }
-  #kindred-send-btn:disabled { background:#bbb; cursor:default; }
-  #kindred-mic-status { font-size:12px; color:#888; padding: 0 0 4px 2px; }
-</style>
-<div id="kindred-mic-wrap">
-  <button id="kindred-mic-btn">🎤 Speak</button>
-  <input id="kindred-transcript" type="text" placeholder="Your words will appear here..." readonly/>
-  <button id="kindred-send-btn" disabled>Send ➤</button>
-</div>
-<div id="kindred-mic-status"></div>
-<script>
-(function() {
-  const micBtn   = document.getElementById("kindred-mic-btn");
-  const box      = document.getElementById("kindred-transcript");
-  const sendBtn  = document.getElementById("kindred-send-btn");
-  const status   = document.getElementById("kindred-mic-status");
-
-  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-    micBtn.textContent = "🎤 Not supported";
-    micBtn.disabled = true;
-    status.textContent = "Use Chrome or Edge for voice input.";
-    return;
-  }
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const recognition = new SR();
-  recognition.lang = "en-ZA";
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-  let listening = false;
-
-  micBtn.addEventListener("click", () => {
-    if (listening) { recognition.stop(); return; }
-    box.value = "";
-    sendBtn.disabled = true;
-    recognition.start();
-  });
-
-  recognition.onstart = () => {
-    listening = true;
-    micBtn.textContent = "⏹ Stop";
-    micBtn.classList.add("listening");
-    status.textContent = "🎙 Listening...";
-  };
-
-  recognition.onend = () => {
-    listening = false;
-    micBtn.textContent = "🎤 Speak";
-    micBtn.classList.remove("listening");
-    status.textContent = box.value ? "✅ Ready — click Send" : "";
-    if (box.value.trim()) sendBtn.disabled = false;
-  };
-
-  recognition.onresult = (event) => {
-    let final = "", interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) final += event.results[i][0].transcript;
-      else interim += event.results[i][0].transcript;
-    }
-    box.value = final || interim;
-  };
-
-  recognition.onerror = (event) => {
-    listening = false;
-    micBtn.textContent = "🎤 Speak";
-    micBtn.classList.remove("listening");
-    status.textContent = "Mic error: " + event.error + ". Check browser mic permissions.";
-  };
-
-  sendBtn.addEventListener("click", () => {
-    const text = box.value.trim();
-    if (!text) return;
-    // Pass transcript to Streamlit via URL query param, then trigger navigation
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set("vc", encodeURIComponent(text));
-    window.parent.location.href = url.toString();
-  });
-})();
-</script>
-"""
-
-st.components.v1.html(voice_input_html, height=80)
-
-# Pick up voice transcript from query params if present
-vc_param = st.query_params.get("vc", "")
-if vc_param and vc_param != st.session_state.voice_transcript:
-    st.session_state.voice_transcript = vc_param
-    # Clear the param so it doesn't re-fire on reruns
-    st.query_params.clear()
-    st.session_state.pending_voice_input = vc_param
-    st.rerun()
+# speech_to_text listens, auto-stops after silence, and returns the transcript
+# directly as a Python string — triggering a Streamlit rerun automatically.
+voice_transcript = speech_to_text(
+    language="en-ZA",
+    start_prompt="🎤 Speak",
+    stop_prompt="⏹ Stop listening",
+    just_once=True,
+    use_container_width=True,
+    key="voice_input",
+)
 
 # ==========================================
 # CHAT INPUT AND RESPONSE
@@ -377,10 +277,9 @@ user_input = st.chat_input(
     else "Or type your question here 😊"
 )
 
-# Use voice input if available, otherwise typed input
-if "pending_voice_input" in st.session_state and st.session_state.pending_voice_input:
-    user_input = st.session_state.pending_voice_input
-    st.session_state.pending_voice_input = ""
+# Voice input takes priority over typed input
+if voice_transcript:
+    user_input = voice_transcript
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -406,7 +305,8 @@ if user_input:
                 st.session_state.messages.append(
                     {"role": "assistant", "content": full_response}
                 )
-                if st.session_state.enable_voice:
+                # Auto-speak reply if the user used voice input, or voice is enabled
+                if st.session_state.enable_voice or voice_transcript:
                     show_voice_button(
                         full_response,
                         st.session_state.voice_speed,
