@@ -16,10 +16,10 @@ st.title("🕊️ Welcome to Kindred")
 # ==========================================
 # AMAZON BEDROCK CONFIGURATION
 # ==========================================
-# Primary model with fallback — Nova Micro is faster/cheaper, Nova Lite is more capable.
+# Cross-region inference profile IDs required for eu-west-1.
 MODELS = [
-    "amazon.nova-lite-v1:0",
-    "amazon.nova-micro-v1:0",
+    "eu.amazon.nova-lite-v1:0",
+    "eu.amazon.nova-micro-v1:0",
 ]
 
 # Load AWS credentials from Streamlit secrets.
@@ -328,7 +328,6 @@ if user_input:
         except Exception as exc:
             response_placeholder.empty()
             st.error(get_error_message(exc))
-            st.error(f"DEBUG: {type(exc).__name__}: {str(exc)}")
 
 
 # ==========================================
@@ -411,3 +410,5 @@ st.caption(
     "Avoid sharing sensitive personal information. Children should use this app "
     "with guidance from a trusted adult."
 )
+DEBUG: ValidationException: An error occurred (ValidationException) when calling the ConverseStream operation: Invocation of model ID amazon.nova-lite-v1:0 with on-demand throughput isn’t supported. Retry your request with the ID or ARN of an inference profile that contains this model.
+
