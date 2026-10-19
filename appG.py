@@ -1,8 +1,9 @@
 import html
-import time
+import json
 
+import boto3
 import streamlit as st
-from openai import OpenAI, APIError, AuthenticationError, RateLimitError
+from botocore.exceptions import ClientError
 
 
 # ==========================================
@@ -13,30 +14,31 @@ st.title("🕊️ Welcome to Kindred")
 
 
 # ==========================================
-# OPENROUTER CONFIGURATION
+# AMAZON BEDROCK CONFIGURATION
 # ==========================================
-# Primary model with fallbacks — if the first is rate-limited, the next is tried.
+# Primary model with fallback — Nova Micro is faster/cheaper, Nova Lite is more capable.
 MODELS = [
-    "google/gemma-4-26b-a4b-it:free",
-    "meta-llama/llama-3.3-8b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-micro-v1:0",
 ]
 
-# You must define OPENROUTER_API_KEY in Streamlit secrets.
+# Load AWS credentials from Streamlit secrets.
 try:
-    api_key = st.secrets["OPENROUTER_API_KEY"]
+    aws_access_key = st.secrets["AWS_ACCESS_KEY_ID"]
+    aws_secret_key = st.secrets["AWS_SECRET_ACCESS_KEY"]
+    aws_region = st.secrets.get("AWS_REGION", "eu-west-1")
 except Exception:
     st.error(
-        "OpenRouter API key is missing. Add OPENROUTER_API_KEY to "
-        "your Streamlit secrets before using Kindred."
+        "AWS credentials are missing. Add AWS_ACCESS_KEY_ID, "
+        "AWS_SECRET_ACCESS_KEY, and AWS_REGION to your Streamlit secrets."
     )
     st.stop()
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=api_key,
-    timeout=60.0,
-    max_retries=0,  # Handle rate limits ourselves; avoid hidden repeat requests.
+bedrock = boto3.client(
+    service_name="bedrock-runtime",
+    region_name=aws_region,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key,
 )
 
 
@@ -59,6 +61,7 @@ Guidelines:
 - Never be preachy or overly cheerful.
 - If you don't know something, be honest.
 - If someone may be in immediate danger, encourage them to contact local emergency services or a trusted person.
+- For South African users in crisis: SADAG 0800 567 567, Lifeline 0861 322 322.
 """
 
 KIDS_PROMPT = """
@@ -129,54 +132,113 @@ def show_voice_button(text: str, speed: float, key: str) -> None:
     st.components.v1.html(component_html, height=42)
 
 
-def get_error_message(exc: Exception) -> str:
-    """Return a user-friendly message without exposing credentials or raw payloads."""
-    details = str(exc).lower()
+def call_bedrock(system_prompt: str, messages: list, max_tokens: int = 700) -> str:
+    """
+    Call Amazon Bedrock with Nova model format, trying each model in MODELS.
+    Returns the response text or raises an exception.
+    """
+    # Convert messages to Bedrock's converse API format
+    bedrock_messages = [
+        {"role": msg["role"], "content": [{"text": msg["content"]}]}
+        for msg in messages
+        if msg["role"] in ("user", "assistant")
+    ]
 
-    if isinstance(exc, AuthenticationError):
-        return (
-            "OpenRouter rejected the API key. Check OPENROUTER_API_KEY "
-            "in Streamlit secrets."
-        )
-
-    if isinstance(exc, RateLimitError):
-        if any(term in details for term in ("quota", "credit", "insufficient", "balance")):
-            return (
-                "The AI provider reports a quota or credit limit. Check your "
-                "OpenRouter activity, key limits, and account credits."
+    last_exc = None
+    for model_id in MODELS:
+        try:
+            response = bedrock.converse(
+                modelId=model_id,
+                system=[{"text": system_prompt}],
+                messages=bedrock_messages,
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": 0.7,
+                },
             )
-        return (
-            "Kindred has reached a request limit, or the selected free model "
-            "is temporarily busy. Wait a little and try again. If this continues, "
-            "check OpenRouter activity and the model's current limits."
-        )
+            return response["output"]["message"]["content"][0]["text"]
+        except ClientError as exc:
+            error_code = exc.response["Error"]["Code"]
+            # ThrottlingException — try next model
+            if error_code == "ThrottlingException":
+                last_exc = exc
+                continue
+            # All other errors raise immediately
+            raise
+    raise last_exc
 
+
+def call_bedrock_stream(system_prompt: str, messages: list, placeholder, max_tokens: int = 700) -> str:
+    """
+    Stream a response from Amazon Bedrock, updating the Streamlit placeholder live.
+    Falls back to next model on throttling. Returns the full response text.
+    """
+    bedrock_messages = [
+        {"role": msg["role"], "content": [{"text": msg["content"]}]}
+        for msg in messages
+        if msg["role"] in ("user", "assistant")
+    ]
+
+    last_exc = None
+    for model_id in MODELS:
+        try:
+            response = bedrock.converse_stream(
+                modelId=model_id,
+                system=[{"text": system_prompt}],
+                messages=bedrock_messages,
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": 0.7,
+                },
+            )
+            full_response = ""
+            for event in response["stream"]:
+                if "contentBlockDelta" in event:
+                    delta = event["contentBlockDelta"]["delta"].get("text", "")
+                    full_response += delta
+                    placeholder.markdown(full_response + "▌")
+            return full_response
+        except ClientError as exc:
+            error_code = exc.response["Error"]["Code"]
+            if error_code == "ThrottlingException":
+                last_exc = exc
+                continue
+            raise
+    raise last_exc
+
+
+def get_error_message(exc: Exception) -> str:
+    """Return a user-friendly error message without leaking raw details."""
+    if isinstance(exc, ClientError):
+        error_code = exc.response["Error"]["Code"]
+        if error_code == "AccessDeniedException":
+            return (
+                "Access was denied. Make sure the IAM user has "
+                "AmazonBedrockFullAccess and that the model is enabled in "
+                "your AWS region (eu-west-1)."
+            )
+        if error_code == "ThrottlingException":
+            return (
+                "Kindred is receiving too many requests right now. "
+                "Please wait a moment and try again."
+            )
+        if error_code in ("ValidationException", "ModelNotReadyException"):
+            return (
+                "The AI model isn't available right now. "
+                "Please try again in a moment."
+            )
     return (
-        "Kindred couldn't get a response from the AI service. Please try again "
-        "shortly. If it continues, check your OpenRouter activity and app logs."
+        "Kindred couldn't get a response just now. Please try again shortly."
     )
 
 
 def create_whisper(prompt: str) -> str:
-    """Request a short daily whisper from the model, with fallbacks."""
-    last_exc = None
-    for model in MODELS:
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": MAIN_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.8,
-                max_tokens=180,
-            )
-            return response.choices[0].message.content or "Take a slow breath. You can begin again gently."
-        except RateLimitError as exc:
-            last_exc = exc
-            time.sleep(1)
-            continue
-    raise last_exc
+    """Request a short daily whisper from Bedrock."""
+    return call_bedrock(
+        system_prompt=MAIN_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=180,
+    )
 
 
 # ==========================================
@@ -234,44 +296,19 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Keep the prompt and recent conversation to limit context growth.
+    # Keep the last 20 messages to limit context growth
     recent_messages = st.session_state.messages[-20:]
-    messages_for_model = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages_for_model.extend(
-        {"role": message["role"], "content": message["content"]}
-        for message in recent_messages
-        if message["role"] in ("user", "assistant")
-    )
 
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
 
         try:
-            # Try each model in the fallback list until one succeeds.
-            last_exc = None
-            for model in MODELS:
-                try:
-                    stream = client.chat.completions.create(
-                        model=model,
-                        messages=messages_for_model,
-                        stream=True,
-                        temperature=0.7,
-                        max_tokens=700,
-                    )
-                    for chunk in stream:
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            full_response += chunk.choices[0].delta.content
-                            response_placeholder.markdown(full_response + "▌")
-                    last_exc = None
-                    break  # Success — stop trying further models
-                except RateLimitError as exc:
-                    last_exc = exc
-                    full_response = ""  # Reset before retrying next model
-                    time.sleep(1)
-                    continue
-            if last_exc:
-                raise last_exc
+            full_response = call_bedrock_stream(
+                system_prompt=SYSTEM_PROMPT,
+                messages=recent_messages,
+                placeholder=response_placeholder,
+            )
 
             if full_response.strip():
                 response_placeholder.markdown(full_response)
@@ -286,17 +323,11 @@ if user_input:
                     )
             else:
                 response_placeholder.empty()
-                st.warning("The AI service returned an empty response. Please try again.")
+                st.warning("The AI returned an empty response. Please try again.")
 
-        except (RateLimitError, AuthenticationError, APIError) as exc:
+        except Exception as exc:
             response_placeholder.empty()
             st.error(get_error_message(exc))
-        except Exception:
-            response_placeholder.empty()
-            st.error(
-                "Something unexpected interrupted the response. Please try again. "
-                "If this continues, check your Streamlit app logs."
-            )
 
 
 # ==========================================
@@ -350,10 +381,8 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
             try:
                 st.session_state.spirit_text = create_whisper(whisper_prompt)
                 st.session_state.spirit_generated = True
-            except (RateLimitError, AuthenticationError, APIError) as exc:
+            except Exception as exc:
                 st.error(get_error_message(exc))
-            except Exception:
-                st.error("Your whisper couldn't be generated just now. Please try again.")
 
     if st.session_state.spirit_generated and st.session_state.spirit_text:
         st.markdown("---")
@@ -377,7 +406,7 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
 # ==========================================
 st.divider()
 st.caption(
-    "🕊️ Kindred uses AI to respond. Messages are sent to OpenRouter for processing. "
+    "🕊️ Kindred uses AI to respond. Messages are processed securely via AWS. "
     "Avoid sharing sensitive personal information. Children should use this app "
     "with guidance from a trusted adult."
 )
