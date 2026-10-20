@@ -1,10 +1,11 @@
+import base64
 import html
-import io
+import os
 
 import boto3
 import streamlit as st
 from botocore.exceptions import ClientError
-from streamlit_mic_recorder import mic_recorder, speech_to_text
+from streamlit_mic_recorder import speech_to_text
 from supabase import create_client, Client
 
 
@@ -51,6 +52,49 @@ bedrock = boto3.client(
     aws_access_key_id=aws_access_key,
     aws_secret_access_key=aws_secret_key,
 )
+
+
+# ==========================================
+# SPIRIT CONFIGURATION
+# ==========================================
+SPIRITS = {
+    "mist": {
+        "name": "Glowing Mist",
+        "file": "spirits/mist.mp4",
+        "fallback": "spirits/mist.png",
+        "description": "Warm, wrapping, comforting",
+        "animation": "mist",
+    },
+    "water": {
+        "name": "Living Water",
+        "file": "spirits/water.mp4",
+        "fallback": "spirits/water.png",
+        "description": "Reflective, flowing, cleansing",
+        "animation": "water",
+    },
+    "starlight": {
+        "name": "Star Fragment",
+        "file": "spirits/starlight.mp4",
+        "fallback": "spirits/starlight.png",
+        "description": "Hopeful, bright, wonder-filled",
+        "animation": "starlight",
+    },
+    "growth": {
+        "name": "Gentle Leaf",
+        "file": "spirits/growth.mp4",
+        "fallback": "spirits/growth.png",
+        "description": "Grounded, unfolding, strengthening",
+        "animation": "growth",
+    },
+}
+
+# Questionnaire → spirit mapping
+ESSENCE_MAP = {
+    "☁️ Mist": "mist",
+    "💧 Water": "water",
+    "⭐ Starlight": "starlight",
+    "🌿 Growth": "growth",
+}
 
 
 # ==========================================
@@ -101,11 +145,14 @@ defaults = {
     "spirit_text": "",
     "voice_speed": 1.0,
     "auto_speak_text": "",
-    "user": None,          # Supabase user object
+    "user": None,
     "is_premium": False,
-    "auth_view": "login",  # "login" | "signup"
+    "auth_view": "login",
     "auth_error": "",
     "auth_success": "",
+    "spirit_key": None,        # which spirit the user has (mist/water/starlight/growth)
+    "spirit_speaking": False,  # true while Kindred is responding
+    "show_questionnaire": False,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -116,7 +163,6 @@ for key, val in defaults.items():
 # AUTH HELPERS
 # ==========================================
 def get_profile(user_id: str) -> dict:
-    """Fetch the user's profile row from Supabase."""
     try:
         result = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
         return result.data or {}
@@ -130,9 +176,10 @@ def login(email: str, password: str):
         st.session_state.user = result.user
         profile = get_profile(result.user.id)
         st.session_state.is_premium = profile.get("is_premium", False)
+        st.session_state.spirit_key = profile.get("spirit_key", None)
         st.session_state.auth_error = ""
         st.rerun()
-    except Exception as e:
+    except Exception:
         st.session_state.auth_error = "Incorrect email or password. Please try again."
 
 
@@ -159,9 +206,22 @@ def signup(email: str, password: str):
 
 def logout():
     supabase.auth.sign_out()
-    for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text", "auto_speak_text"]:
+    for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text",
+                "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire"]:
         st.session_state[key] = defaults[key]
     st.rerun()
+
+
+def save_spirit(spirit_key: str):
+    """Save the user's chosen spirit to their profile."""
+    if st.session_state.user and st.session_state.user != "guest":
+        try:
+            supabase.table("profiles").update(
+                {"spirit_key": spirit_key}
+            ).eq("id", st.session_state.user.id).execute()
+            st.session_state.spirit_key = spirit_key
+        except Exception:
+            pass
 
 
 # ==========================================
@@ -172,7 +232,6 @@ def render_auth():
     st.markdown("##### A gentle space to say what's on your mind.")
     st.divider()
 
-    # Anonymous free access option
     st.markdown("**Continue without an account**")
     st.caption("Free access — chat anonymously, no sign-up needed.")
     if st.button("Enter as Guest", use_container_width=True):
@@ -182,7 +241,6 @@ def render_auth():
 
     st.divider()
 
-    # Toggle between login and signup
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Log In", use_container_width=True,
@@ -216,7 +274,6 @@ def render_auth():
                     st.session_state.auth_error = "Please enter your email and password."
         if st.session_state.auth_error:
             st.error(st.session_state.auth_error)
-
     else:
         with st.form("signup_form"):
             email = st.text_input("Email")
@@ -244,6 +301,204 @@ def render_auth():
 if not st.session_state.user:
     render_auth()
     st.stop()
+
+
+# ==========================================
+# SPIRIT HELPERS
+# ==========================================
+
+def render_spirit(spirit_key: str, speaking: bool = False):
+    """Render the animated spirit component using video."""
+    spirit = SPIRITS[spirit_key]
+    video_path = spirit["file"]
+    fallback_path = spirit["fallback"]
+    animation = spirit["animation"]
+
+    # Use video if available, fall back to image
+    use_video = os.path.exists(video_path)
+    media_path = video_path if use_video else fallback_path
+
+    if not os.path.exists(media_path):
+        return
+
+    # Encode media to base64
+    with open(media_path, "rb") as f:
+        media_b64 = base64.b64encode(f.read()).decode()
+
+    # Per-essence glow and particle colours
+    essence_styles = {
+        "mist":      {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffd680"},
+        "water":     {"glow": "rgba(80,  160, 255, 0.5)",  "particle_color": "#80c8ff"},
+        "starlight": {"glow": "rgba(160, 180, 255, 0.5)",  "particle_color": "#c8d8ff"},
+        "growth":    {"glow": "rgba(100, 200, 80,  0.5)",  "particle_color": "#90e080"},
+    }
+    style = essence_styles.get(animation, essence_styles["mist"])
+    glow = style["glow"]
+    particle_color = style["particle_color"]
+
+    # Speaking state changes animation speed and glow intensity
+    speak_filter = f"drop-shadow(0 0 32px {glow}) drop-shadow(0 0 12px {glow}) brightness(1.3)" if speaking else f"drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow})"
+    float_duration = "2s" if speaking else "4s"
+
+    if use_video:
+        media_tag = f"""
+        <video
+            class="spirit-media"
+            src="data:video/mp4;base64,{media_b64}"
+            autoplay loop muted playsinline
+        ></video>
+        """
+    else:
+        media_tag = f"""
+        <img
+            class="spirit-media"
+            src="data:image/png;base64,{media_b64}"
+            alt="{spirit['name']}"
+        />
+        """
+
+    html_content = f"""
+    <style>
+    @keyframes spirit-float {{
+        0%   {{ transform: scale(1) translateY(0px);   }}
+        50%  {{ transform: scale(1.03) translateY(-8px); }}
+        100% {{ transform: scale(1) translateY(0px);   }}
+    }}
+    @keyframes particle-float {{
+        0%   {{ transform: translateY(0px) translateX(0px); opacity: 0; }}
+        20%  {{ opacity: 0.7; }}
+        80%  {{ opacity: 0.3; }}
+        100% {{ transform: translateY(-50px) translateX(15px); opacity: 0; }}
+    }}
+
+    .spirit-container {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        padding: 8px 0 4px 0;
+        margin-bottom: 4px;
+        position: relative;
+    }}
+    .spirit-media {{
+        width: 300px;
+        height: 300px;
+        object-fit: cover;
+        border-radius: 50%;
+        animation: spirit-float {float_duration} ease-in-out infinite;
+        position: relative;
+        z-index: 2;
+        filter: {speak_filter};
+        transition: filter 0.6s ease;
+    }}
+    .spirit-name {{
+        color: rgba(255,255,255,0.4);
+        font-size: 10px;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin-top: 12px;
+        font-family: Georgia, serif;
+    }}
+    .spirit-status {{
+        color: rgba(255,255,255,0.2);
+        font-size: 10px;
+        margin-top: 4px;
+        letter-spacing: 1px;
+        font-style: italic;
+    }}
+    .particle {{
+        position: absolute;
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: {particle_color};
+        animation: particle-float linear infinite;
+        pointer-events: none;
+        z-index: 3;
+    }}
+    </style>
+
+    <div class="spirit-container">
+        <div class="particle" style="left:18%; bottom:20%; animation-duration:3.5s; animation-delay:0s;   opacity:0.5;"></div>
+        <div class="particle" style="left:72%; bottom:15%; animation-duration:4.2s; animation-delay:1s;   opacity:0.45;"></div>
+        <div class="particle" style="left:50%; bottom:5%;  animation-duration:3.8s; animation-delay:0.5s; opacity:0.6;"></div>
+        <div class="particle" style="left:28%; bottom:35%; animation-duration:5s;   animation-delay:2s;   opacity:0.3;"></div>
+        <div class="particle" style="left:80%; bottom:38%; animation-duration:4.5s; animation-delay:1.5s; opacity:0.4;"></div>
+        <div class="particle" style="left:62%; bottom:22%; animation-duration:3.2s; animation-delay:0.8s; opacity:0.35;"></div>
+        <div class="particle" style="left:38%; bottom:12%; animation-duration:4.8s; animation-delay:2.5s; opacity:0.3;"></div>
+
+        {media_tag}
+        <div class="spirit-name">{spirit['name']}</div>
+        <div class="spirit-status">{"✦ present with you ✦" if not speaking else "✦ speaking ✦"}</div>
+    </div>
+    """
+
+    st.components.v1.html(html_content, height=360)
+
+
+# ==========================================
+# SPIRIT QUESTIONNAIRE
+# ==========================================
+def render_questionnaire():
+    st.markdown("### 🌌 Discover Your Kindred Spirit")
+    st.markdown(
+        "Answer from the heart — there's no right or wrong. "
+        "Your spirit will be created from who you are, not just how you feel today."
+    )
+    st.divider()
+
+    with st.form("spirit_questionnaire"):
+        st.markdown("**How do you tend to move through the world?**")
+        vibe = st.select_slider(
+            "Your natural pace",
+            options=["Gentle", "Quiet", "Peaceful", "Warm", "Hopeful", "Strong", "Restless", "Mysterious"],
+            value="Gentle",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("**Which element feels most like home to you?**")
+        element = st.radio(
+            "Your element",
+            options=["☁️ Mist", "💧 Water", "⭐ Starlight", "🌿 Growth"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+        st.markdown("**What do you most need from a quiet, safe space?**")
+        need = st.select_slider(
+            "Your need",
+            options=["Comfort", "Gentleness", "Peace", "Clarity", "Hope", "Strength"],
+            value="Peace",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("**How do you experience your emotions?**")
+        emotion_style = st.radio(
+            "Emotion style",
+            options=[
+                "Like waves — they rise and fall",
+                "Like light — they shift and change",
+                "Like roots — they run deep and steady",
+                "Like weather — they pass through me",
+            ],
+            label_visibility="collapsed",
+        )
+
+        submitted = st.form_submit_button(
+            "✨ Create My Spirit", use_container_width=True, type="primary"
+        )
+
+        if submitted:
+            spirit_key = ESSENCE_MAP.get(element, "mist")
+            save_spirit(spirit_key)
+            st.session_state.show_questionnaire = False
+            st.success(f"Your spirit has been created — {SPIRITS[spirit_key]['name']}.")
+            st.rerun()
+
+    if st.button("← Back", use_container_width=True):
+        st.session_state.show_questionnaire = False
+        st.rerun()
 
 
 # ==========================================
@@ -358,7 +613,6 @@ def create_whisper(prompt: str) -> str:
 
 
 def premium_gate(feature_name: str):
-    """Show an upgrade prompt for gated features."""
     st.info(
         f"✨ **{feature_name}** is a Premium feature. "
         "Upgrade to Kindred Premium (R39/month) to unlock this and more."
@@ -370,7 +624,6 @@ def premium_gate(feature_name: str):
 # ==========================================
 st.title("🕊️ Kindred")
 
-# User status bar
 is_guest = st.session_state.user == "guest"
 col_status, col_logout = st.columns([4, 1])
 with col_status:
@@ -383,6 +636,50 @@ with col_status:
 with col_logout:
     if st.button("Log out" if not is_guest else "Exit", use_container_width=True):
         logout()
+
+
+# ==========================================
+# QUESTIONNAIRE PAGE
+# ==========================================
+if st.session_state.show_questionnaire:
+    render_questionnaire()
+    st.stop()
+
+
+# ==========================================
+# SPIRIT DISPLAY (Premium only — shown above chat)
+# ==========================================
+if st.session_state.is_premium:
+    if st.session_state.spirit_key:
+        render_spirit(
+            st.session_state.spirit_key,
+            speaking=st.session_state.spirit_speaking
+        )
+        col_spirit1, col_spirit2 = st.columns([3, 1])
+        with col_spirit2:
+            if st.button("✦ Update Spirit", use_container_width=True):
+                st.session_state.show_questionnaire = True
+                st.rerun()
+    else:
+        # Premium user hasn't created their spirit yet
+        st.markdown(
+            """
+            <div style='background:#0a0a0f; border-radius:20px; padding:32px;
+                        text-align:center; margin-bottom:12px;'>
+                <div style='font-size:48px; margin-bottom:12px;'>🌌</div>
+                <div style='color:rgba(255,255,255,0.7); font-size:16px; margin-bottom:8px;'>
+                    Your Kindred Spirit is waiting
+                </div>
+                <div style='color:rgba(255,255,255,0.4); font-size:13px;'>
+                    Answer a few gentle questions to create your personal spirit
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("✨ Create My Spirit", use_container_width=True, type="primary"):
+            st.session_state.show_questionnaire = True
+            st.rerun()
 
 
 # ==========================================
@@ -459,6 +756,10 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
+    # Activate spirit speaking state
+    if st.session_state.spirit_key:
+        st.session_state.spirit_speaking = True
+
     recent_messages = st.session_state.messages[-20:]
 
     with st.chat_message("assistant"):
@@ -483,6 +784,9 @@ if user_input:
         except Exception as exc:
             response_placeholder.empty()
             st.error(get_error_message(exc))
+        finally:
+            # Return spirit to idle after response
+            st.session_state.spirit_speaking = False
 
 if st.session_state.auto_speak_text:
     auto_speak(st.session_state.auto_speak_text, st.session_state.voice_speed)
@@ -542,7 +846,6 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
         st.markdown(st.session_state.spirit_text)
         st.markdown("---")
 
-        # Save whisper — premium only
         if st.session_state.is_premium:
             st.download_button(
                 label="Save Your Whisper",
@@ -559,14 +862,6 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
             st.session_state.spirit_text = ""
             st.rerun()
 
-# Kindred Spirit — premium only
-with st.expander("🌌 Your Kindred Spirit", expanded=False):
-    if st.session_state.is_premium:
-        st.info("Spirit creation coming soon — your personal, evolving ethereal companion.")
-    else:
-        premium_gate("Kindred Spirit")
-
-# Conversation history — premium only
 with st.expander("📄 Conversation History", expanded=False):
     if st.session_state.is_premium:
         st.info("Conversation saving coming soon.")
