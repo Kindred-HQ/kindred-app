@@ -1,9 +1,9 @@
 🕊️ Kindred — Privacy Policy
 
-Last Updated: 17 October 2026
+Last Updated: 20 October 2026
 
 📌 In Short
-Your conversations are yours. We don't sell them. We don't read them. We don't use them for advertising. Period.
+We do not sell conversation data or use it for advertising. Chat messages are processed to generate replies and are not saved as conversation history in our Supabase database.
 
 1. Who We Are
 
@@ -13,35 +13,37 @@ Contact: kindred.hello@proton.me
 
 2. What Information We Collect
 
-We collect as little as possible:
+Depending on how you use Kindred, the service may process or store:
 
-• What you type: The messages you share in conversation
+• Conversation content: Messages are held in the active app session and sent to Amazon Bedrock to generate replies. The app does not currently save chat history to Supabase.
 
-• Session data: Temporary information needed to keep the chat working properly
+• Account data: If you create an account, Supabase Auth handles your email and authentication. The app's profile record may include premium access status and your selected Kindred Spirit.
 
-• No account required: You do not need to give us your name, email address, or any personal details to use Kindred
+• Daily usage data: Supabase stores a daily message count and an identifier used to enforce free limits. For signed-in users this is based on the account ID. For guests it may be derived from your IP address, or from a browser/session identifier if an IP address is unavailable. These identifiers are pseudonymous; guest use should not be described as fully anonymous.
+
+• Voice input: If you use voice input, your browser's speech-recognition feature converts audio to text. Processing of the audio may be subject to your browser or device provider's terms. The resulting transcript is sent to Amazon Bedrock like typed messages.
 
 3. How We Use Your Information
 
-• ✅ Only to respond to you — your messages are processed to generate a helpful, thoughtful reply
+• ✅ To provide the service — conversation content is sent to Amazon Bedrock to generate a reply
 
-• ✅ Temporary processing only — your conversation is sent to our AI service provider solely to generate that response
+• ✅ To enforce free limits — daily usage identifiers and counts are stored in Supabase
 
-• ❌ We never sell your data — to anyone, ever
+• ✅ To provide accounts and profile features — account and profile data are handled through Supabase
 
-• ❌ We never use your conversations for advertising — no exceptions
+• ❌ We do not sell your data or use conversations for advertising
 
-• ❌ We never read your conversations — no human at Kindred accesses what you share
+The app does not currently save conversations as chat history in Supabase. Messages remain in the active Streamlit session while it is running. The app does not provide an operator-facing conversation-history feature. Service providers process data under their own applicable terms and policies.
 
 Our AI Service Provider
 
-Currently, we use OpenAI's API to process messages. Please note:
+The deployed app currently uses Amazon Bedrock to process chat and whisper prompts. Please review AWS's applicable service terms and privacy information:
 
-• OpenAI processes your message only to generate a response
+• Your message is sent to AWS to generate a response
 
-• We have confirmed that API inputs and outputs are NOT used for OpenAI's model training
+• We do not make claims here about AWS processing, retention, or model-training practices; those are governed by AWS's current terms and configuration
 
-• Conversations are processed temporarily and are not permanently stored by us or by OpenAI beyond what is needed
+The separate local development app connects to an Ollama server at localhost. It is not the deployed Bedrock app; its data handling depends on the local Ollama setup.
 
 4. Your Rights (POPIA — South Africa)
 
@@ -55,7 +57,7 @@ As a user in South Africa, you have rights under the Protection of Personal Info
 
 • ✅ Right to complain — if you believe we've mishandled your data, you can report to the South African Information Regulator
 
-Because we don't require accounts or permanently store your personal details, simply closing or clearing your chat removes your conversation from your local session immediately
+Chat content is not currently saved as persistent conversation history. Account, profile, and daily usage records are separate and are not removed by closing a chat. To ask about or request deletion of account-related records, contact us at the email below. We will handle requests subject to applicable law and operational requirements.
 
 5. Important Disclaimer
 
@@ -73,7 +75,7 @@ Kindred is NOT a mental health service, medical provider, or crisis hotline. It 
 
 6. Children & Minors
 
-Kindred is intended for users aged 13 and older. We do not knowingly collect personal information from children.
+Kindred is intended for users aged 13 and older. The app currently includes a Kids Mode option for eligible premium accounts, but it does not include a parent/guardian setup flow. Children should use the app only with a parent or guardian's involvement. Do not provide a child's identifying information.
 
 7. Changes to This Policy
 
