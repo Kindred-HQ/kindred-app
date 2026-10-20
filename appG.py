@@ -64,7 +64,7 @@ bedrock = boto3.client(
 SPIRITS = {
     "mist": {
         "name": "Glowing Mist",
-        "file": "spirits/mist.mp4",
+        "file": "spirits/mist_pingpong.mp4",
         "fallback": "spirits/mist.png",
         "description": "Warm, wrapping, comforting",
         "animation": "mist",
@@ -173,11 +173,11 @@ for key, val in defaults.items():
 # (chat + whispers). Override with Streamlit secret FREE_DAILY_MESSAGE_LIMIT.
 SAST = timezone(timedelta(hours=2))
 try:
-    FREE_DAILY_MESSAGE_LIMIT = int(st.secrets.get("FREE_DAILY_MESSAGE_LIMIT", 15))
+    FREE_DAILY_MESSAGE_LIMIT = int(st.secrets.get("FREE_DAILY_MESSAGE_LIMIT", 30))
 except (TypeError, ValueError):
-    FREE_DAILY_MESSAGE_LIMIT = 15
+    FREE_DAILY_MESSAGE_LIMIT = 30
 if FREE_DAILY_MESSAGE_LIMIT < 1:
-    FREE_DAILY_MESSAGE_LIMIT = 15
+    FREE_DAILY_MESSAGE_LIMIT = 30
 
 CAP_REACHED_MESSAGE = (
     "You've used today's free messages — that's okay. Kindred will be here "
@@ -1041,7 +1041,7 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
         else:
             whisper_prompt = (
                 f"Create a short, poetic message for someone who feels {vibe}, "
-                f"connected to {element}, and seeking {feeling}. Keep it to 2-3 "
+                f"connected to {element}, and seeking {feeling}. Keep it to 3-4 "
                 "sentences maximum. Start with a short, meaningful name for this feeling. "
                 "Be warm and comforting."
             )
