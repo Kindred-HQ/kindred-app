@@ -60,25 +60,29 @@ bedrock = boto3.client(
 SPIRITS = {
     "mist": {
         "name": "Glowing Mist",
-        "file": "spirits/mist.png",
+        "file": "spirits/mist.mp4",
+        "fallback": "spirits/mist.png",
         "description": "Warm, wrapping, comforting",
         "animation": "mist",
     },
     "water": {
         "name": "Living Water",
-        "file": "spirits/water.png",
+        "file": "spirits/water.mp4",
+        "fallback": "spirits/water.png",
         "description": "Reflective, flowing, cleansing",
         "animation": "water",
     },
     "starlight": {
         "name": "Star Fragment",
-        "file": "spirits/starlight.png",
+        "file": "spirits/starlight.mp4",
+        "fallback": "spirits/starlight.png",
         "description": "Hopeful, bright, wonder-filled",
         "animation": "starlight",
     },
     "growth": {
         "name": "Gentle Leaf",
-        "file": "spirits/growth.png",
+        "file": "spirits/growth.mp4",
+        "fallback": "spirits/growth.png",
         "description": "Grounded, unfolding, strengthening",
         "animation": "growth",
     },
@@ -302,108 +306,70 @@ if not st.session_state.user:
 # ==========================================
 # SPIRIT HELPERS
 # ==========================================
-def get_image_base64(image_path: str) -> str:
-    """Convert image file to base64 string for embedding in HTML."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
-
 
 def render_spirit(spirit_key: str, speaking: bool = False):
-    """Render the animated spirit component."""
+    """Render the animated spirit component using video."""
     spirit = SPIRITS[spirit_key]
-    image_path = spirit["file"]
+    video_path = spirit["file"]
+    fallback_path = spirit["fallback"]
+    animation = spirit["animation"]
 
-    if not os.path.exists(image_path):
+    # Use video if available, fall back to image
+    use_video = os.path.exists(video_path)
+    media_path = video_path if use_video else fallback_path
+
+    if not os.path.exists(media_path):
         return
 
-    img_b64 = get_image_base64(image_path)
-    animation = spirit["animation"]
-    speak_class = "speaking" if speaking else ""
-
-    # Define animation CSS per essence
-    css_animations = """
-    @keyframes mist-idle {
-        0%   { transform: scale(1) translateY(0px); filter: brightness(1) blur(0px); }
-        50%  { transform: scale(1.04) translateY(-6px); filter: brightness(1.1) blur(0.5px); }
-        100% { transform: scale(1) translateY(0px); filter: brightness(1) blur(0px); }
-    }
-    @keyframes mist-speak {
-        0%   { transform: scale(1) rotate(0deg); filter: brightness(1.2); }
-        25%  { transform: scale(1.06) rotate(1deg); filter: brightness(1.35); }
-        75%  { transform: scale(1.06) rotate(-1deg); filter: brightness(1.35); }
-        100% { transform: scale(1) rotate(0deg); filter: brightness(1.2); }
-    }
-    @keyframes water-idle {
-        0%   { transform: scale(1) translateY(0px); filter: brightness(1); }
-        40%  { transform: scale(1.03) translateY(-4px); filter: brightness(1.08) hue-rotate(5deg); }
-        100% { transform: scale(1) translateY(0px); filter: brightness(1); }
-    }
-    @keyframes water-speak {
-        0%   { transform: scale(1.02); filter: brightness(1.2) hue-rotate(0deg); }
-        50%  { transform: scale(1.07); filter: brightness(1.4) hue-rotate(15deg); }
-        100% { transform: scale(1.02); filter: brightness(1.2) hue-rotate(0deg); }
-    }
-    @keyframes starlight-idle {
-        0%   { transform: scale(1); filter: brightness(1); opacity: 0.95; }
-        30%  { transform: scale(1.02) translateY(-3px); filter: brightness(1.15); opacity: 1; }
-        60%  { transform: scale(0.99); filter: brightness(0.95); opacity: 0.9; }
-        100% { transform: scale(1); filter: brightness(1); opacity: 0.95; }
-    }
-    @keyframes starlight-speak {
-        0%   { transform: scale(1.02); filter: brightness(1.3); opacity: 1; }
-        25%  { transform: scale(1.08) rotate(2deg); filter: brightness(1.6); opacity: 1; }
-        75%  { transform: scale(1.08) rotate(-2deg); filter: brightness(1.6); opacity: 1; }
-        100% { transform: scale(1.02); filter: brightness(1.3); opacity: 1; }
-    }
-    @keyframes growth-idle {
-        0%   { transform: scale(1) rotate(0deg); filter: brightness(1); }
-        50%  { transform: scale(1.03) rotate(1.5deg) translateY(-4px); filter: brightness(1.1); }
-        100% { transform: scale(1) rotate(0deg); filter: brightness(1); }
-    }
-    @keyframes growth-speak {
-        0%   { transform: scale(1.02) rotate(0deg); filter: brightness(1.2); }
-        33%  { transform: scale(1.07) rotate(2deg); filter: brightness(1.4); }
-        66%  { transform: scale(1.07) rotate(-2deg); filter: brightness(1.4); }
-        100% { transform: scale(1.02) rotate(0deg); filter: brightness(1.2); }
-    }
-    @keyframes particle-float {
-        0%   { transform: translateY(0px) translateX(0px); opacity: 0; }
-        20%  { opacity: 0.6; }
-        80%  { opacity: 0.3; }
-        100% { transform: translateY(-40px) translateX(15px); opacity: 0; }
-    }
-    @keyframes glow-pulse {
-        0%   { opacity: 0.3; }
-        50%  { opacity: 0.7; }
-        100% { opacity: 0.3; }
-    }
-    """
-
-    # Map animation type to CSS animation name
-    idle_anim = f"{animation}-idle"
-    speak_anim = f"{animation}-speak"
-
-    if speaking:
-        anim_name = speak_anim
-        anim_duration = "1.2s"
-    else:
-        anim_name = idle_anim
-        anim_duration = "4s"
+    # Encode media to base64
+    with open(media_path, "rb") as f:
+        media_b64 = base64.b64encode(f.read()).decode()
 
     # Per-essence glow and particle colours
     essence_styles = {
-        "mist":      {"glow": "rgba(255, 210, 120, 0.4)",  "particle_color": "#ffd680"},
-        "water":     {"glow": "rgba(80,  160, 255, 0.4)",  "particle_color": "#80c8ff"},
-        "starlight": {"glow": "rgba(160, 180, 255, 0.4)",  "particle_color": "#c8d8ff"},
-        "growth":    {"glow": "rgba(100, 200, 80,  0.4)",  "particle_color": "#90e080"},
+        "mist":      {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffd680"},
+        "water":     {"glow": "rgba(80,  160, 255, 0.5)",  "particle_color": "#80c8ff"},
+        "starlight": {"glow": "rgba(160, 180, 255, 0.5)",  "particle_color": "#c8d8ff"},
+        "growth":    {"glow": "rgba(100, 200, 80,  0.5)",  "particle_color": "#90e080"},
     }
     style = essence_styles.get(animation, essence_styles["mist"])
     glow = style["glow"]
     particle_color = style["particle_color"]
 
+    # Speaking state changes animation speed and glow intensity
+    speak_filter = f"drop-shadow(0 0 32px {glow}) drop-shadow(0 0 12px {glow}) brightness(1.3)" if speaking else f"drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow})"
+    float_duration = "2s" if speaking else "4s"
+
+    if use_video:
+        media_tag = f"""
+        <video
+            class="spirit-media"
+            src="data:video/mp4;base64,{media_b64}"
+            autoplay loop muted playsinline
+        ></video>
+        """
+    else:
+        media_tag = f"""
+        <img
+            class="spirit-media"
+            src="data:image/png;base64,{media_b64}"
+            alt="{spirit['name']}"
+        />
+        """
+
     html_content = f"""
     <style>
-    {css_animations}
+    @keyframes spirit-float {{
+        0%   {{ transform: scale(1) translateY(0px);   }}
+        50%  {{ transform: scale(1.03) translateY(-8px); }}
+        100% {{ transform: scale(1) translateY(0px);   }}
+    }}
+    @keyframes particle-float {{
+        0%   {{ transform: translateY(0px) translateX(0px); opacity: 0; }}
+        20%  {{ opacity: 0.7; }}
+        80%  {{ opacity: 0.3; }}
+        100% {{ transform: translateY(-50px) translateX(15px); opacity: 0; }}
+    }}
 
     .spirit-container {{
         display: flex;
@@ -415,16 +381,16 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         margin-bottom: 4px;
         position: relative;
     }}
-    .spirit-img {{
+    .spirit-media {{
         width: 300px;
         height: 300px;
         object-fit: cover;
         border-radius: 50%;
-        animation: {anim_name} {anim_duration} ease-in-out infinite;
+        animation: spirit-float {float_duration} ease-in-out infinite;
         position: relative;
         z-index: 2;
-        transition: all 0.6s ease;
-        filter: drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow});
+        filter: {speak_filter};
+        transition: filter 0.6s ease;
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
@@ -454,7 +420,6 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     </style>
 
     <div class="spirit-container">
-        <!-- Floating particles around the spirit -->
         <div class="particle" style="left:18%; bottom:20%; animation-duration:3.5s; animation-delay:0s;   opacity:0.5;"></div>
         <div class="particle" style="left:72%; bottom:15%; animation-duration:4.2s; animation-delay:1s;   opacity:0.45;"></div>
         <div class="particle" style="left:50%; bottom:5%;  animation-duration:3.8s; animation-delay:0.5s; opacity:0.6;"></div>
@@ -463,7 +428,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         <div class="particle" style="left:62%; bottom:22%; animation-duration:3.2s; animation-delay:0.8s; opacity:0.35;"></div>
         <div class="particle" style="left:38%; bottom:12%; animation-duration:4.8s; animation-delay:2.5s; opacity:0.3;"></div>
 
-        <img class="spirit-img" src="data:image/png;base64,{img_b64}" alt="{spirit['name']}" />
+        {media_tag}
         <div class="spirit-name">{spirit['name']}</div>
         <div class="spirit-status">{"✦ present with you ✦" if not speaking else "✦ speaking ✦"}</div>
     </div>
