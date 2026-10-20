@@ -1,6 +1,10 @@
 import base64
+import hashlib
 import html
+import json
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import boto3
 import streamlit as st
@@ -153,10 +157,193 @@ defaults = {
     "spirit_key": None,        # which spirit the user has (mist/water/starlight/growth)
     "spirit_speaking": False,  # true while Kindred is responding
     "show_questionnaire": False,
+    "guest_usage_id": None,
+    "usage_date": "",
+    "usage_count": 0,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+
+# ==========================================
+# FREE DAILY MESSAGE CAP
+# ==========================================
+# Premium is unlimited. Guests and free accounts share a daily Bedrock budget
+# (chat + whispers). Override with Streamlit secret FREE_DAILY_MESSAGE_LIMIT.
+SAST = timezone(timedelta(hours=2))
+try:
+    FREE_DAILY_MESSAGE_LIMIT = int(st.secrets.get("FREE_DAILY_MESSAGE_LIMIT", 15))
+except (TypeError, ValueError):
+    FREE_DAILY_MESSAGE_LIMIT = 15
+if FREE_DAILY_MESSAGE_LIMIT < 1:
+    FREE_DAILY_MESSAGE_LIMIT = 15
+
+CAP_REACHED_MESSAGE = (
+    "You've used today's free messages — that's okay. Kindred will be here "
+    "again tomorrow. Premium removes the daily cap if you ever want more space."
+)
+
+
+def _usage_today() -> str:
+    return datetime.now(SAST).date().isoformat()
+
+
+@st.cache_resource
+def _usage_memory_store() -> dict:
+    """Process-level fallback so a refresh cannot reset the cap on this server."""
+    return {}
+
+
+def _client_ip() -> Optional[str]:
+    try:
+        ip = getattr(st.context, "ip_address", None)
+        if ip:
+            return str(ip)
+        headers = getattr(st.context, "headers", None)
+        if not headers:
+            return None
+        forwarded = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = headers.get("X-Real-IP") or headers.get("x-real-ip")
+        if real_ip:
+            return str(real_ip)
+    except Exception:
+        return None
+    return None
+
+
+def _usage_fingerprint() -> str:
+    user = st.session_state.user
+    if user and user != "guest":
+        return f"user:{user.id}"
+
+    salt = str(st.secrets.get("USAGE_FINGERPRINT_SALT", "kindred"))
+    ip = _client_ip()
+    if ip:
+        digest = hashlib.sha256(f"{salt}|ip|{ip}".encode()).hexdigest()[:24]
+        return f"guest:{digest}"
+
+    if not st.session_state.guest_usage_id:
+        existing = None
+        try:
+            existing = st.query_params.get("kid")
+            if isinstance(existing, list):
+                existing = existing[0] if existing else None
+        except Exception:
+            existing = None
+        if existing:
+            st.session_state.guest_usage_id = str(existing)
+        else:
+            st.session_state.guest_usage_id = hashlib.sha256(
+                os.urandom(16)
+            ).hexdigest()[:24]
+            try:
+                st.query_params["kid"] = st.session_state.guest_usage_id
+            except Exception:
+                pass
+    digest = hashlib.sha256(
+        f"{salt}|sid|{st.session_state.guest_usage_id}".encode()
+    ).hexdigest()[:24]
+    return f"guest:{digest}"
+
+
+def _parse_rpc_payload(data):
+    if data is None:
+        return None
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(data, list) and data:
+        data = data[0]
+    return data if isinstance(data, dict) else None
+
+
+def _memory_usage_count(fingerprint: str) -> int:
+    store = _usage_memory_store()
+    return int(store.get(f"{fingerprint}:{_usage_today()}", 0))
+
+
+def _memory_consume(fingerprint: str, limit: int) -> tuple:
+    store = _usage_memory_store()
+    key = f"{fingerprint}:{_usage_today()}"
+    count = int(store.get(key, 0))
+    if count >= limit:
+        return False, count
+    count += 1
+    store[key] = count
+    return True, count
+
+
+def get_daily_usage_count() -> int:
+    if st.session_state.is_premium:
+        return 0
+    fingerprint = _usage_fingerprint()
+    today = _usage_today()
+    remote = None
+    try:
+        result = supabase.rpc(
+            "get_daily_message_count", {"p_fingerprint": fingerprint}
+        ).execute()
+        if result.data is not None:
+            remote = int(result.data)
+    except Exception:
+        remote = None
+
+    memory = _memory_usage_count(fingerprint)
+    if st.session_state.get("usage_date") != today:
+        st.session_state.usage_date = today
+        st.session_state.usage_count = 0
+    combined = max(int(st.session_state.usage_count or 0), memory)
+    if remote is not None:
+        combined = max(combined, remote)
+        st.session_state.usage_count = combined
+        st.session_state.usage_date = today
+    return combined
+
+
+def remaining_free_messages() -> Optional[int]:
+    if st.session_state.is_premium:
+        return None
+    return max(0, FREE_DAILY_MESSAGE_LIMIT - get_daily_usage_count())
+
+
+def consume_free_message() -> bool:
+    """Reserve one free Bedrock call. Premium always allowed."""
+    if st.session_state.is_premium:
+        return True
+
+    fingerprint = _usage_fingerprint()
+    limit = FREE_DAILY_MESSAGE_LIMIT
+    today = _usage_today()
+
+    try:
+        result = supabase.rpc(
+            "consume_daily_message",
+            {"p_fingerprint": fingerprint, "p_limit": limit},
+        ).execute()
+        payload = _parse_rpc_payload(result.data)
+        if payload is not None and "allowed" in payload:
+            count = int(payload.get("count") or 0)
+            allowed = bool(payload.get("allowed"))
+            st.session_state.usage_date = today
+            st.session_state.usage_count = count
+            _usage_memory_store()[f"{fingerprint}:{today}"] = count
+            return allowed
+    except Exception:
+        pass
+
+    allowed, count = _memory_consume(fingerprint, limit)
+    st.session_state.usage_date = today
+    st.session_state.usage_count = count
+    return allowed
+
+
+def render_free_cap_notice() -> None:
+    st.info(CAP_REACHED_MESSAGE)
 
 
 # ==========================================
@@ -177,6 +364,8 @@ def login(email: str, password: str):
         profile = get_profile(result.user.id)
         st.session_state.is_premium = profile.get("is_premium", False)
         st.session_state.spirit_key = profile.get("spirit_key", None)
+        st.session_state.usage_date = ""
+        st.session_state.usage_count = 0
         st.session_state.auth_error = ""
         st.rerun()
     except Exception:
@@ -207,7 +396,8 @@ def signup(email: str, password: str):
 def logout():
     supabase.auth.sign_out()
     for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text",
-                "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire"]:
+                "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
+                "guest_usage_id", "usage_date", "usage_count"]:
         st.session_state[key] = defaults[key]
     st.rerun()
 
@@ -233,10 +423,12 @@ def render_auth():
     st.divider()
 
     st.markdown("**Continue without an account**")
-    st.caption("Free access — chat anonymously, no sign-up needed.")
+    st.caption("Free access — no sign-up needed. A usage ID helps enforce the daily limit.")
     if st.button("Enter as Guest", use_container_width=True):
         st.session_state.user = "guest"
         st.session_state.is_premium = False
+        st.session_state.usage_date = ""
+        st.session_state.usage_count = 0
         st.rerun()
 
     st.divider()
@@ -625,6 +817,7 @@ def premium_gate(feature_name: str):
 st.title("🕊️ Kindred")
 
 is_guest = st.session_state.user == "guest"
+free_remaining = remaining_free_messages()
 col_status, col_logout = st.columns([4, 1])
 with col_status:
     if is_guest:
@@ -633,6 +826,11 @@ with col_status:
         st.caption(f"✨ Premium — {st.session_state.user.email}")
     else:
         st.caption(f"🤍 Free — {st.session_state.user.email}")
+    if free_remaining is not None:
+        st.caption(
+            f"{free_remaining} of {FREE_DAILY_MESSAGE_LIMIT} free messages left today "
+            "(resets at midnight SAST)."
+        )
 with col_logout:
     if st.button("Log out" if not is_guest else "Exit", use_container_width=True):
         logout()
@@ -725,16 +923,22 @@ for index, msg in enumerate(st.session_state.messages):
 # ==========================================
 # VOICE INPUT
 # ==========================================
-st.markdown("🎤 **Voice** — click Start, speak, click Stop when done")
+chat_capped = free_remaining is not None and free_remaining <= 0
+if chat_capped:
+    render_free_cap_notice()
+else:
+    st.markdown("🎤 **Voice** — click Start, speak, click Stop when done")
 
-voice_transcript = speech_to_text(
-    language="en-ZA",
-    start_prompt="🎤 Start speaking",
-    stop_prompt="⏹ Done — send",
-    just_once=True,
-    use_container_width=True,
-    key="kindred_stt",
-)
+voice_transcript = None
+if not chat_capped:
+    voice_transcript = speech_to_text(
+        language="en-ZA",
+        start_prompt="🎤 Start speaking",
+        stop_prompt="⏹ Done — send",
+        just_once=True,
+        use_container_width=True,
+        key="kindred_stt",
+    )
 
 
 # ==========================================
@@ -743,7 +947,8 @@ voice_transcript = speech_to_text(
 user_input = st.chat_input(
     "Or type what's on your mind..."
     if st.session_state.mode == "main"
-    else "Or type your question here"
+    else "Or type your question here",
+    disabled=chat_capped,
 )
 
 used_voice = False
@@ -752,41 +957,44 @@ if voice_transcript and not user_input:
     used_voice = True
 
 if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    if not consume_free_message():
+        render_free_cap_notice()
+    else:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-    # Activate spirit speaking state
-    if st.session_state.spirit_key:
-        st.session_state.spirit_speaking = True
+        # Activate spirit speaking state
+        if st.session_state.spirit_key:
+            st.session_state.spirit_speaking = True
 
-    recent_messages = st.session_state.messages[-20:]
+        recent_messages = st.session_state.messages[-20:]
 
-    with st.chat_message("assistant"):
-        response_placeholder = st.empty()
-        full_response = ""
-        try:
-            full_response = call_bedrock_stream(
-                system_prompt=SYSTEM_PROMPT,
-                messages=recent_messages,
-                placeholder=response_placeholder,
-                max_tokens=400,
-            )
-            if full_response.strip():
-                response_placeholder.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-                show_replay_button(full_response, st.session_state.voice_speed, "latest")
-                if used_voice:
-                    st.session_state.auto_speak_text = full_response
-            else:
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            full_response = ""
+            try:
+                full_response = call_bedrock_stream(
+                    system_prompt=SYSTEM_PROMPT,
+                    messages=recent_messages,
+                    placeholder=response_placeholder,
+                    max_tokens=400,
+                )
+                if full_response.strip():
+                    response_placeholder.markdown(full_response)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    show_replay_button(full_response, st.session_state.voice_speed, "latest")
+                    if used_voice:
+                        st.session_state.auto_speak_text = full_response
+                else:
+                    response_placeholder.empty()
+                    st.warning("The AI returned an empty response. Please try again.")
+            except Exception as exc:
                 response_placeholder.empty()
-                st.warning("The AI returned an empty response. Please try again.")
-        except Exception as exc:
-            response_placeholder.empty()
-            st.error(get_error_message(exc))
-        finally:
-            # Return spirit to idle after response
-            st.session_state.spirit_speaking = False
+                st.error(get_error_message(exc))
+            finally:
+                # Return spirit to idle after response
+                st.session_state.spirit_speaking = False
 
 if st.session_state.auto_speak_text:
     auto_speak(st.session_state.auto_speak_text, st.session_state.voice_speed)
@@ -828,18 +1036,21 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
     )
 
     if st.button("Receive Your Whisper", type="primary", use_container_width=True):
-        whisper_prompt = (
-            f"Create a short, poetic message for someone who feels {vibe}, "
-            f"connected to {element}, and seeking {feeling}. Keep it to 2-3 "
-            "sentences maximum. Start with a short, meaningful name for this feeling. "
-            "Be warm and comforting."
-        )
-        with st.spinner("Your whisper is taking shape..."):
-            try:
-                st.session_state.spirit_text = create_whisper(whisper_prompt)
-                st.session_state.spirit_generated = True
-            except Exception as exc:
-                st.error(get_error_message(exc))
+        if not consume_free_message():
+            render_free_cap_notice()
+        else:
+            whisper_prompt = (
+                f"Create a short, poetic message for someone who feels {vibe}, "
+                f"connected to {element}, and seeking {feeling}. Keep it to 2-3 "
+                "sentences maximum. Start with a short, meaningful name for this feeling. "
+                "Be warm and comforting."
+            )
+            with st.spinner("Your whisper is taking shape..."):
+                try:
+                    st.session_state.spirit_text = create_whisper(whisper_prompt)
+                    st.session_state.spirit_generated = True
+                except Exception as exc:
+                    st.error(get_error_message(exc))
 
     if st.session_state.spirit_generated and st.session_state.spirit_text:
         st.markdown("---")
@@ -875,6 +1086,7 @@ with st.expander("📄 Conversation History", expanded=False):
 st.divider()
 st.caption(
     "Kindred uses AI to respond. Messages are processed securely via AWS. "
+    "Free use includes a gentle daily message cap. "
     "Avoid sharing sensitive personal information. Children should use this app "
     "with guidance from a trusted adult."
 )
