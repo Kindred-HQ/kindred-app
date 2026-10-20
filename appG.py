@@ -390,14 +390,16 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         anim_name = idle_anim
         anim_duration = "4s"
 
-    # Glow colours per essence
-    glow_colors = {
-        "mist": "rgba(255, 220, 150, 0.25)",
-        "water": "rgba(100, 180, 255, 0.25)",
-        "starlight": "rgba(200, 210, 255, 0.25)",
-        "growth": "rgba(120, 200, 100, 0.25)",
+    # Per-essence glow and particle colours
+    essence_styles = {
+        "mist":      {"glow": "rgba(255, 210, 120, 0.4)",  "particle_color": "#ffd680"},
+        "water":     {"glow": "rgba(80,  160, 255, 0.4)",  "particle_color": "#80c8ff"},
+        "starlight": {"glow": "rgba(160, 180, 255, 0.4)",  "particle_color": "#c8d8ff"},
+        "growth":    {"glow": "rgba(100, 200, 80,  0.4)",  "particle_color": "#90e080"},
     }
-    glow = glow_colors.get(animation, "rgba(255,255,255,0.2)")
+    style = essence_styles.get(animation, essence_styles["mist"])
+    glow = style["glow"]
+    particle_color = style["particle_color"]
 
     html_content = f"""
     <style>
@@ -408,68 +410,58 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #0a0a0f;
-        border-radius: 20px;
-        padding: 20px;
-        margin-bottom: 12px;
+        background: transparent;
+        padding: 8px 0 4px 0;
+        margin-bottom: 4px;
         position: relative;
-        overflow: hidden;
-        min-height: 280px;
-    }}
-    .spirit-glow {{
-        position: absolute;
-        width: 200px;
-        height: 200px;
-        border-radius: 50%;
-        background: radial-gradient(circle, {glow} 0%, transparent 70%);
-        animation: glow-pulse {anim_duration} ease-in-out infinite;
-        pointer-events: none;
     }}
     .spirit-img {{
-        width: 220px;
-        height: 220px;
-        object-fit: contain;
-        border-radius: 12px;
+        width: 300px;
+        height: 300px;
+        object-fit: cover;
+        border-radius: 50%;
         animation: {anim_name} {anim_duration} ease-in-out infinite;
         position: relative;
         z-index: 2;
-        transition: all 0.5s ease;
+        transition: all 0.6s ease;
+        filter: drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow});
     }}
     .spirit-name {{
-        color: rgba(255,255,255,0.5);
-        font-size: 12px;
-        letter-spacing: 2px;
+        color: rgba(255,255,255,0.4);
+        font-size: 10px;
+        letter-spacing: 3px;
         text-transform: uppercase;
         margin-top: 12px;
         font-family: Georgia, serif;
     }}
     .spirit-status {{
-        color: rgba(255,255,255,0.3);
+        color: rgba(255,255,255,0.2);
         font-size: 10px;
         margin-top: 4px;
         letter-spacing: 1px;
+        font-style: italic;
     }}
     .particle {{
         position: absolute;
-        width: 4px;
-        height: 4px;
+        width: 3px;
+        height: 3px;
         border-radius: 50%;
-        background: white;
+        background: {particle_color};
         animation: particle-float linear infinite;
         pointer-events: none;
-        z-index: 1;
+        z-index: 3;
     }}
     </style>
 
     <div class="spirit-container">
-        <div class="spirit-glow"></div>
-
-        <!-- Floating particles -->
-        <div class="particle" style="left:20%; bottom:20%; animation-duration:3.5s; animation-delay:0s; opacity:0.4;"></div>
-        <div class="particle" style="left:70%; bottom:15%; animation-duration:4.2s; animation-delay:1s; opacity:0.3;"></div>
-        <div class="particle" style="left:45%; bottom:10%; animation-duration:3.8s; animation-delay:0.5s; opacity:0.5;"></div>
-        <div class="particle" style="left:30%; bottom:25%; animation-duration:5s; animation-delay:2s; opacity:0.2;"></div>
-        <div class="particle" style="left:80%; bottom:30%; animation-duration:4.5s; animation-delay:1.5s; opacity:0.35;"></div>
+        <!-- Floating particles around the spirit -->
+        <div class="particle" style="left:18%; bottom:20%; animation-duration:3.5s; animation-delay:0s;   opacity:0.5;"></div>
+        <div class="particle" style="left:72%; bottom:15%; animation-duration:4.2s; animation-delay:1s;   opacity:0.45;"></div>
+        <div class="particle" style="left:50%; bottom:5%;  animation-duration:3.8s; animation-delay:0.5s; opacity:0.6;"></div>
+        <div class="particle" style="left:28%; bottom:35%; animation-duration:5s;   animation-delay:2s;   opacity:0.3;"></div>
+        <div class="particle" style="left:80%; bottom:38%; animation-duration:4.5s; animation-delay:1.5s; opacity:0.4;"></div>
+        <div class="particle" style="left:62%; bottom:22%; animation-duration:3.2s; animation-delay:0.8s; opacity:0.35;"></div>
+        <div class="particle" style="left:38%; bottom:12%; animation-duration:4.8s; animation-delay:2.5s; opacity:0.3;"></div>
 
         <img class="spirit-img" src="data:image/png;base64,{img_b64}" alt="{spirit['name']}" />
         <div class="spirit-name">{spirit['name']}</div>
@@ -477,7 +469,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     </div>
     """
 
-    st.components.v1.html(html_content, height=320)
+    st.components.v1.html(html_content, height=360)
 
 
 # ==========================================
