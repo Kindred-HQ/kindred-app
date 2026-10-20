@@ -4,22 +4,34 @@ import io
 import boto3
 import streamlit as st
 from botocore.exceptions import ClientError
-from streamlit_mic_recorder import mic_recorder
+from streamlit_mic_recorder import mic_recorder, speech_to_text
+from supabase import create_client, Client
 
 
 # ==========================================
 # PAGE SETUP
 # ==========================================
 st.set_page_config(page_title="Kindred", page_icon="🕊️", layout="centered")
-st.title("🕊️ Welcome to Kindred")
+
+
+# ==========================================
+# SUPABASE CLIENT
+# ==========================================
+@st.cache_resource
+def get_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_ANON_KEY"]
+    return create_client(url, key)
+
+supabase = get_supabase()
 
 
 # ==========================================
 # AMAZON BEDROCK CONFIGURATION
 # ==========================================
 MODELS = [
-    "eu.amazon.nova-lite-v1:0",
     "eu.amazon.nova-micro-v1:0",
+    "eu.amazon.nova-lite-v1:0",
 ]
 
 try:
@@ -40,14 +52,6 @@ bedrock = boto3.client(
     aws_secret_access_key=aws_secret_key,
 )
 
-# Bedrock Transcribe client for speech-to-text
-transcribe = boto3.client(
-    service_name="transcribe",
-    region_name=aws_region,
-    aws_access_key_id=aws_access_key,
-    aws_secret_access_key=aws_secret_key,
-)
-
 
 # ==========================================
 # SYSTEM PROMPTS
@@ -62,7 +66,7 @@ You do not need to fix everything — just be there.
 
 Guidelines:
 - Speak in a warm, gentle, conversational tone.
-- Keep responses concise but meaningful.
+- Keep responses short and conversational — 2 to 4 sentences max.
 - Validate feelings before offering perspective.
 - Be inclusive; never assume or reinforce stereotypes.
 - Never be preachy or overly cheerful.
@@ -90,27 +94,162 @@ Rules:
 # ==========================================
 # SESSION STATE
 # ==========================================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "mode" not in st.session_state:
-    st.session_state.mode = "main"
-if "spirit_generated" not in st.session_state:
-    st.session_state.spirit_generated = False
-if "spirit_text" not in st.session_state:
-    st.session_state.spirit_text = ""
-if "voice_speed" not in st.session_state:
-    st.session_state.voice_speed = 1.0
-if "pending_voice_text" not in st.session_state:
-    st.session_state.pending_voice_text = ""
-if "auto_speak_text" not in st.session_state:
-    st.session_state.auto_speak_text = ""
+defaults = {
+    "messages": [],
+    "mode": "main",
+    "spirit_generated": False,
+    "spirit_text": "",
+    "voice_speed": 1.0,
+    "auto_speak_text": "",
+    "user": None,          # Supabase user object
+    "is_premium": False,
+    "auth_view": "login",  # "login" | "signup"
+    "auth_error": "",
+    "auth_success": "",
+}
+for key, val in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+
+# ==========================================
+# AUTH HELPERS
+# ==========================================
+def get_profile(user_id: str) -> dict:
+    """Fetch the user's profile row from Supabase."""
+    try:
+        result = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
+        return result.data or {}
+    except Exception:
+        return {}
+
+
+def login(email: str, password: str):
+    try:
+        result = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state.user = result.user
+        profile = get_profile(result.user.id)
+        st.session_state.is_premium = profile.get("is_premium", False)
+        st.session_state.auth_error = ""
+        st.rerun()
+    except Exception as e:
+        st.session_state.auth_error = "Incorrect email or password. Please try again."
+
+
+def signup(email: str, password: str):
+    try:
+        result = supabase.auth.sign_up({"email": email, "password": password})
+        if result.user:
+            st.session_state.auth_success = (
+                "Account created! Check your email to confirm, then log in."
+            )
+            st.session_state.auth_view = "login"
+            st.session_state.auth_error = ""
+        else:
+            st.session_state.auth_error = "Something went wrong. Please try again."
+    except Exception as e:
+        err = str(e).lower()
+        if "already" in err or "exists" in err:
+            st.session_state.auth_error = "An account with that email already exists."
+        elif "password" in err:
+            st.session_state.auth_error = "Password must be at least 6 characters."
+        else:
+            st.session_state.auth_error = "Could not create account. Please try again."
+
+
+def logout():
+    supabase.auth.sign_out()
+    for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text", "auto_speak_text"]:
+        st.session_state[key] = defaults[key]
+    st.rerun()
+
+
+# ==========================================
+# AUTH UI
+# ==========================================
+def render_auth():
+    st.title("🕊️ Kindred")
+    st.markdown("##### A gentle space to say what's on your mind.")
+    st.divider()
+
+    # Anonymous free access option
+    st.markdown("**Continue without an account**")
+    st.caption("Free access — chat anonymously, no sign-up needed.")
+    if st.button("Enter as Guest", use_container_width=True):
+        st.session_state.user = "guest"
+        st.session_state.is_premium = False
+        st.rerun()
+
+    st.divider()
+
+    # Toggle between login and signup
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Log In", use_container_width=True,
+                     type="primary" if st.session_state.auth_view == "login" else "secondary"):
+            st.session_state.auth_view = "login"
+            st.session_state.auth_error = ""
+            st.session_state.auth_success = ""
+            st.rerun()
+    with col2:
+        if st.button("Create Account", use_container_width=True,
+                     type="primary" if st.session_state.auth_view == "signup" else "secondary"):
+            st.session_state.auth_view = "signup"
+            st.session_state.auth_error = ""
+            st.session_state.auth_success = ""
+            st.rerun()
+
+    st.markdown("")
+
+    if st.session_state.auth_success:
+        st.success(st.session_state.auth_success)
+
+    if st.session_state.auth_view == "login":
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log In", use_container_width=True, type="primary")
+            if submitted:
+                if email and password:
+                    login(email, password)
+                else:
+                    st.session_state.auth_error = "Please enter your email and password."
+        if st.session_state.auth_error:
+            st.error(st.session_state.auth_error)
+
+    else:
+        with st.form("signup_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password (min. 6 characters)", type="password")
+            submitted = st.form_submit_button("Create Account", use_container_width=True, type="primary")
+            if submitted:
+                if email and password:
+                    signup(email, password)
+                    st.rerun()
+                else:
+                    st.session_state.auth_error = "Please fill in all fields."
+        if st.session_state.auth_error:
+            st.error(st.session_state.auth_error)
+
+    st.divider()
+    st.caption(
+        "Premium features (voice, conversation history, Kindred Spirit, Kids Mode) "
+        "require an account. Free chat is always available — no account needed."
+    )
+
+
+# ==========================================
+# SHOW AUTH SCREEN IF NOT LOGGED IN
+# ==========================================
+if not st.session_state.user:
+    render_auth()
+    st.stop()
 
 
 # ==========================================
 # HELPERS
 # ==========================================
 def auto_speak(text: str, speed: float) -> None:
-    """Immediately speak text via browser SpeechSynthesis — no button click needed."""
     safe_text = html.escape(text, quote=True)
     st.components.v1.html(f"""
     <script>
@@ -127,7 +266,6 @@ def auto_speak(text: str, speed: float) -> None:
 
 
 def show_replay_button(text: str, speed: float, key: str) -> None:
-    """Render a small Replay button under a response."""
     safe_text = html.escape(text, quote=True)
     st.components.v1.html(f"""
     <div id="kr-{key}">
@@ -147,57 +285,7 @@ def show_replay_button(text: str, speed: float, key: str) -> None:
     """, height=28)
 
 
-def transcribe_audio(audio_bytes: bytes) -> str:
-    """
-    Transcribe audio using Amazon Transcribe streaming — no S3 needed.
-    Falls back gracefully if unavailable.
-    """
-    import boto3
-    import json
-    import asyncio
-
-    async def _transcribe():
-        client = boto3.client(
-            "transcribe-streaming",
-            region_name=aws_region,
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-        )
-        # amazon-transcribe-streaming-sdk is needed for this
-        # We use a simpler REST approach instead
-        return None
-
-    # Use Amazon Transcribe synchronous (via S3) is complex.
-    # Instead we use the browser's built-in Google Speech via streamlit-mic-recorder's
-    # speech_to_text, but we need a different approach here.
-    # For now return None to signal we should use the text fallback.
-    return None
-
-
-def call_bedrock(system_prompt: str, messages: list, max_tokens: int = 700) -> str:
-    bedrock_messages = [
-        {"role": m["role"], "content": [{"text": m["content"]}]}
-        for m in messages if m["role"] in ("user", "assistant")
-    ]
-    last_exc = None
-    for model_id in MODELS:
-        try:
-            response = bedrock.converse(
-                modelId=model_id,
-                system=[{"text": system_prompt}],
-                messages=bedrock_messages,
-                inferenceConfig={"maxTokens": max_tokens, "temperature": 0.7},
-            )
-            return response["output"]["message"]["content"][0]["text"]
-        except ClientError as exc:
-            if exc.response["Error"]["Code"] == "ThrottlingException":
-                last_exc = exc
-                continue
-            raise
-    raise last_exc
-
-
-def call_bedrock_stream(system_prompt: str, messages: list, placeholder, max_tokens: int = 700) -> str:
+def call_bedrock_stream(system_prompt: str, messages: list, placeholder, max_tokens: int = 400) -> str:
     bedrock_messages = [
         {"role": m["role"], "content": [{"text": m["content"]}]}
         for m in messages if m["role"] in ("user", "assistant")
@@ -226,6 +314,29 @@ def call_bedrock_stream(system_prompt: str, messages: list, placeholder, max_tok
     raise last_exc
 
 
+def call_bedrock(system_prompt: str, messages: list, max_tokens: int = 700) -> str:
+    bedrock_messages = [
+        {"role": m["role"], "content": [{"text": m["content"]}]}
+        for m in messages if m["role"] in ("user", "assistant")
+    ]
+    last_exc = None
+    for model_id in MODELS:
+        try:
+            response = bedrock.converse(
+                modelId=model_id,
+                system=[{"text": system_prompt}],
+                messages=bedrock_messages,
+                inferenceConfig={"maxTokens": max_tokens, "temperature": 0.7},
+            )
+            return response["output"]["message"]["content"][0]["text"]
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ThrottlingException":
+                last_exc = exc
+                continue
+            raise
+    raise last_exc
+
+
 def get_error_message(exc: Exception) -> str:
     if isinstance(exc, ClientError):
         code = exc.response["Error"]["Code"]
@@ -246,38 +357,49 @@ def create_whisper(prompt: str) -> str:
     )
 
 
-# ==========================================
-# VOICE INPUT CALLBACK
-# ==========================================
-def on_voice_recorded():
-    """Called immediately when mic_recorder gets audio. Transcribes and stores text."""
-    audio_data = st.session_state.get("kindred_mic_output")
-    if not audio_data:
-        return
+def premium_gate(feature_name: str):
+    """Show an upgrade prompt for gated features."""
+    st.info(
+        f"✨ **{feature_name}** is a Premium feature. "
+        "Upgrade to Kindred Premium (R39/month) to unlock this and more."
+    )
 
-    audio_bytes = audio_data["bytes"]
 
-    # Use browser-side Google Speech via speech_to_text is not available here.
-    # We use a lightweight approach: store the raw audio and transcribe with
-    # Amazon Transcribe Medical or a simple workaround.
-    # Best available option without extra APIs: use the audio bytes with
-    # a pre-built transcription. For now, signal that audio was received.
-    # The actual transcription happens via the speech_to_text widget below.
-    st.session_state.pending_voice_text = "__audio_received__"
+# ==========================================
+# HEADER
+# ==========================================
+st.title("🕊️ Kindred")
+
+# User status bar
+is_guest = st.session_state.user == "guest"
+col_status, col_logout = st.columns([4, 1])
+with col_status:
+    if is_guest:
+        st.caption("👤 Guest — free access")
+    elif st.session_state.is_premium:
+        st.caption(f"✨ Premium — {st.session_state.user.email}")
+    else:
+        st.caption(f"🤍 Free — {st.session_state.user.email}")
+with col_logout:
+    if st.button("Log out" if not is_guest else "Exit", use_container_width=True):
+        logout()
 
 
 # ==========================================
 # MODE SELECTOR
 # ==========================================
+mode_options = ["🕊️ Kindred (Ages 13+)"]
+if st.session_state.is_premium:
+    mode_options.append("🌱 Kindred Kids (Up to age 12)")
+
 mode_choice = st.radio(
     "Choose your space",
-    options=["🕊️ Kindred (Ages 13+)", "🌱 Kindred Kids (Up to age 12)"],
+    options=mode_options,
     horizontal=True,
-    index=0 if st.session_state.mode == "main" else 1,
     label_visibility="collapsed",
 )
 
-new_mode = "main" if "Kindred (Ages 13+)" in mode_choice else "kids"
+new_mode = "kids" if "Kids" in mode_choice else "main"
 if new_mode != st.session_state.mode:
     st.session_state.mode = new_mode
     st.session_state.messages = []
@@ -306,12 +428,7 @@ for index, msg in enumerate(st.session_state.messages):
 # ==========================================
 # VOICE INPUT
 # ==========================================
-# mic_recorder records audio; speech_to_text transcribes it via browser Google Speech API.
-# Both use the same button — click to start, click to stop.
-# The transcript comes back as a native Python value triggering a Streamlit rerun.
 st.markdown("🎤 **Voice** — click Start, speak, click Stop when done")
-
-from streamlit_mic_recorder import speech_to_text
 
 voice_transcript = speech_to_text(
     language="en-ZA",
@@ -332,7 +449,6 @@ user_input = st.chat_input(
     else "Or type your question here"
 )
 
-# Voice takes priority; mark that this came from voice for auto-speak
 used_voice = False
 if voice_transcript and not user_input:
     user_input = voice_transcript
@@ -353,12 +469,12 @@ if user_input:
                 system_prompt=SYSTEM_PROMPT,
                 messages=recent_messages,
                 placeholder=response_placeholder,
+                max_tokens=400,
             )
             if full_response.strip():
                 response_placeholder.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
                 show_replay_button(full_response, st.session_state.voice_speed, "latest")
-                # Auto-speak when user used voice input
                 if used_voice:
                     st.session_state.auto_speak_text = full_response
             else:
@@ -368,7 +484,6 @@ if user_input:
             response_placeholder.empty()
             st.error(get_error_message(exc))
 
-# Fire auto-speak if flagged (runs on the rerun after response is stored)
 if st.session_state.auto_speak_text:
     auto_speak(st.session_state.auto_speak_text, st.session_state.voice_speed)
     st.session_state.auto_speak_text = ""
@@ -426,17 +541,37 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
         st.markdown("---")
         st.markdown(st.session_state.spirit_text)
         st.markdown("---")
-        st.download_button(
-            label="Save Your Whisper",
-            data=st.session_state.spirit_text,
-            file_name="my-kindred-whisper.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+
+        # Save whisper — premium only
+        if st.session_state.is_premium:
+            st.download_button(
+                label="Save Your Whisper",
+                data=st.session_state.spirit_text,
+                file_name="my-kindred-whisper.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        else:
+            st.caption("✨ Save & revisit whispers with Premium.")
+
         if st.button("New Whisper", use_container_width=True):
             st.session_state.spirit_generated = False
             st.session_state.spirit_text = ""
             st.rerun()
+
+# Kindred Spirit — premium only
+with st.expander("🌌 Your Kindred Spirit", expanded=False):
+    if st.session_state.is_premium:
+        st.info("Spirit creation coming soon — your personal, evolving ethereal companion.")
+    else:
+        premium_gate("Kindred Spirit")
+
+# Conversation history — premium only
+with st.expander("📄 Conversation History", expanded=False):
+    if st.session_state.is_premium:
+        st.info("Conversation saving coming soon.")
+    else:
+        premium_gate("Conversation History")
 
 
 # ==========================================
