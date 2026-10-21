@@ -952,6 +952,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         -webkit-mask-image: none;
         mix-blend-mode: normal;
         filter: saturate(1.25) contrast(1.12);
+        filter: url(#spirit-flow) saturate(1.25) contrast(1.12);
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
@@ -979,6 +980,32 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         z-index: 3;
     }}
     </style>
+
+    <svg aria-hidden="true" width="0" height="0" style="position:absolute">
+        <filter id="spirit-flow" x="-5%" y="-5%" width="110%" height="110%">
+            <feTurbulence
+                type="fractalNoise"
+                baseFrequency="0.008 0.018"
+                numOctaves="2"
+                seed="7"
+                result="flow-noise"
+            >
+                <animate
+                    attributeName="baseFrequency"
+                    values="0.008 0.018;0.004 0.010;0.008 0.018"
+                    dur="8s"
+                    repeatCount="indefinite"
+                />
+            </feTurbulence>
+            <feDisplacementMap
+                in="SourceGraphic"
+                in2="flow-noise"
+                scale="7"
+                xChannelSelector="R"
+                yChannelSelector="G"
+            />
+        </filter>
+    </svg>
 
     <div class="{container_class}">
         <div class="particle" style="left:18%; bottom:20%; animation-duration:3.5s; animation-delay:0s;   opacity:0.5;"></div>
