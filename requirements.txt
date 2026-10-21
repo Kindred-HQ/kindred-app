@@ -3,3 +3,4 @@ boto3
 streamlit-mic-recorder
 supabase
 openai
+pillow
