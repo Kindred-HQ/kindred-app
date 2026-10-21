@@ -94,7 +94,7 @@ bedrock = boto3.client(
     aws_secret_access_key=aws_secret_key,
 )
 BEDROCK_IMAGE_MODEL_ID = st.secrets.get(
-    "BEDROCK_IMAGE_MODEL_ID", "amazon.nova-canvas-v1:0"
+    "BEDROCK_IMAGE_MODEL_ID", "stability.stable-image-core-v1:1"
 )
 bedrock_image = boto3.client(
     service_name="bedrock-runtime",
@@ -225,23 +225,14 @@ SPIRIT_NEGATIVE_PROMPT = (
 
 
 def generate_spirit_image(prompt: str) -> str:
-    if not 1 <= len(prompt) <= 1024:
-        raise ValueError("Spirit image prompt must be between 1 and 1024 characters.")
+    if not 1 <= len(prompt) <= 10000:
+        raise ValueError("Spirit image prompt must be between 1 and 10000 characters.")
 
     request_body = {
-        "taskType": "TEXT_IMAGE",
-        "textToImageParams": {
-            "text": prompt,
-            "negativeText": SPIRIT_NEGATIVE_PROMPT,
-            "style": "SOFT_DIGITAL_PAINTING",
-        },
-        "imageGenerationConfig": {
-            "width": 512,
-            "height": 512,
-            "quality": "standard",
-            "cfgScale": 6.5,
-            "numberOfImages": 1,
-        },
+        "prompt": prompt,
+        "negative_prompt": SPIRIT_NEGATIVE_PROMPT,
+        "aspect_ratio": "1:1",
+        "output_format": "png",
     }
     response = bedrock_image.invoke_model(
         modelId=BEDROCK_IMAGE_MODEL_ID,
@@ -1017,7 +1008,7 @@ def render_questionnaire():
                     error_code = exc.response.get("Error", {}).get("Code", "")
                     if error_code == "AccessDeniedException":
                         st.error(
-                            "Bedrock image access was denied. Check that Nova Canvas "
+                            "Bedrock image access was denied. Check that Stable Image Core "
                             "is enabled for this AWS account and region."
                         )
                     elif error_code == "ThrottlingException":
