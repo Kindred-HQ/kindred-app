@@ -2,6 +2,7 @@ import base64
 import hashlib
 import html
 import json
+import logging
 import os
 import random
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,7 @@ try:
     aws_access_key = st.secrets["AWS_ACCESS_KEY_ID"]
     aws_secret_key = st.secrets["AWS_SECRET_ACCESS_KEY"]
     aws_region = st.secrets.get("AWS_REGION", "eu-west-1")
+    BEDROCK_IMAGE_REGION = st.secrets.get("BEDROCK_IMAGE_REGION", "us-west-2")
 except Exception:
     st.error(
         "AWS credentials are missing. Add AWS_ACCESS_KEY_ID, "
@@ -93,12 +95,10 @@ bedrock = boto3.client(
     aws_access_key_id=aws_access_key,
     aws_secret_access_key=aws_secret_key,
 )
-BEDROCK_IMAGE_MODEL_ID = st.secrets.get(
-    "BEDROCK_IMAGE_MODEL_ID", "stability.stable-image-core-v1:1"
-)
+BEDROCK_IMAGE_MODEL_ID = "stability.stable-image-core-v1:1"
 bedrock_image = boto3.client(
     service_name="bedrock-runtime",
-    region_name=aws_region,
+    region_name=BEDROCK_IMAGE_REGION,
     aws_access_key_id=aws_access_key,
     aws_secret_access_key=aws_secret_key,
     config=Config(connect_timeout=10, read_timeout=300),
@@ -1006,17 +1006,30 @@ def render_questionnaire():
                     st.rerun()
                 except ClientError as exc:
                     error_code = exc.response.get("Error", {}).get("Code", "")
+                    logging.exception(
+                        "Spirit image request failed in %s with %s",
+                        BEDROCK_IMAGE_REGION,
+                        error_code,
+                    )
                     if error_code == "AccessDeniedException":
                         st.error(
-                            "Bedrock image access was denied. Check that Stable Image Core "
-                            "is enabled for this AWS account and region."
+                            "Bedrock denied Stable Image Core access. Check model access "
+                            "and bedrock:InvokeModel permissions in "
+                            f"{BEDROCK_IMAGE_REGION}."
                         )
                     elif error_code == "ThrottlingException":
                         st.error("Image generation is busy. Please wait and try again.")
+                    elif error_code == "ResourceNotFoundException":
+                        st.error(
+                            "Stable Image Core wasn't found in "
+                            f"{BEDROCK_IMAGE_REGION}. Check the image region and "
+                            "confirm that this model is enabled for the AWS account."
+                        )
                     else:
                         st.error(
-                            "Kindred couldn't create the spirit image. Check the Bedrock "
-                            "model ID, region, and app logs, then try again."
+                            "Bedrock rejected the spirit image request "
+                            f"({error_code or 'unknown error'}). Check the Streamlit "
+                            "app logs for details."
                         )
                 except RuntimeError as exc:
                     st.error(str(exc))
