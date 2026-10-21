@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -15,6 +16,8 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from PIL import Image
 from PIL import ImageChops
+from PIL import ImageDraw
+from PIL import ImageFilter
 from streamlit_mic_recorder import speech_to_text
 from supabase import create_client, Client
 
@@ -229,10 +232,39 @@ SPIRIT_NEGATIVE_PROMPT = (
 
 def remove_spirit_background(image_base64: str) -> str:
     image = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert("RGBA")
-    brightness = image.convert("RGB").convert("L")
-    background_mask = brightness.point(
-        lambda value: min(255, max(0, (value - 8) * 255 // 56))
+    rgb_image = image.convert("RGB")
+    width, height = image.size
+    sample_radius = min(4, max(1, width // 128), max(1, height // 128))
+    corner_samples = [
+        rgb_image.getpixel((x, y))
+        for origin_x, origin_y in (
+            (0, 0),
+            (width - sample_radius, 0),
+            (0, height - sample_radius),
+            (width - sample_radius, height - sample_radius),
+        )
+        for x in range(origin_x, min(width, origin_x + sample_radius))
+        for y in range(origin_y, min(height, origin_y + sample_radius))
+    ]
+    background_color = tuple(
+        int(statistics.median(color[channel] for color in corner_samples))
+        for channel in range(3)
     )
+    background = Image.new("RGB", image.size, background_color)
+    color_distance = ImageChops.difference(rgb_image, background).convert("L")
+    candidates = color_distance.point(lambda distance: 0 if distance <= 48 else 255)
+    connected_background = candidates.copy()
+    for edge_point in (
+        (0, 0),
+        (width - 1, 0),
+        (0, height - 1),
+        (width - 1, height - 1),
+    ):
+        if connected_background.getpixel(edge_point) == 0:
+            ImageDraw.floodfill(connected_background, edge_point, 128, thresh=0)
+    background_mask = connected_background.point(
+        lambda value: 0 if value == 128 else 255
+    ).filter(ImageFilter.GaussianBlur(radius=0.8))
     image.putalpha(ImageChops.multiply(image.getchannel("A"), background_mask))
     output = io.BytesIO()
     image.save(output, format="PNG")
@@ -333,7 +365,7 @@ defaults = {
     "spirit_prompt": "",
     "spirit_style_seed": None,
     "spirit_image": None,
-    "spirit_image_processed": False,
+    "spirit_image_processed": 0,
     "spirit_storage_path": None,
     "spirit_created_at": None,
     "spirit_load_error": False,
@@ -554,7 +586,7 @@ def login(email: str, password: str):
             (st.session_state.spirit_configuration or {}).get("style_seed")
         )
         st.session_state.spirit_image = None
-        st.session_state.spirit_image_processed = False
+        st.session_state.spirit_image_processed = 0
         st.session_state.spirit_load_error = False
         if st.session_state.spirit_storage_path:
             try:
@@ -788,10 +820,10 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     animation = spirit["animation"]
 
     generated_image = st.session_state.get("spirit_image")
-    if generated_image and not st.session_state.spirit_image_processed:
+    if generated_image and st.session_state.spirit_image_processed != 2:
         generated_image = remove_spirit_background(generated_image)
         st.session_state.spirit_image = generated_image
-        st.session_state.spirit_image_processed = True
+        st.session_state.spirit_image_processed = 2
     if generated_image:
         use_video = False
         media_b64 = generated_image
@@ -1019,7 +1051,7 @@ def render_questionnaire():
                         configuration,
                     )
                     st.session_state.spirit_image = generated_image
-                    st.session_state.spirit_image_processed = True
+                    st.session_state.spirit_image_processed = 2
                     st.session_state.spirit_configuration = configuration
                     st.session_state.spirit_style_seed = seed_key
                     st.session_state.spirit_prompt = spirit_prompt
