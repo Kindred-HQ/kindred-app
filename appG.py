@@ -3,11 +3,13 @@ import hashlib
 import html
 import json
 import os
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import boto3
 import streamlit as st
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from streamlit_mic_recorder import speech_to_text
 from supabase import create_client, Client
@@ -53,6 +55,17 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
+SPIRIT_STORAGE_BUCKET = "kindred-spirits"
+
+
+@st.cache_resource
+def get_supabase_admin() -> Client:
+    service_role_key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not service_role_key:
+        raise RuntimeError(
+            "Add SUPABASE_SERVICE_ROLE_KEY to Streamlit secrets before creating a spirit."
+        )
+    return create_client(st.secrets["SUPABASE_URL"], service_role_key)
 
 
 # ==========================================
@@ -79,6 +92,16 @@ bedrock = boto3.client(
     region_name=aws_region,
     aws_access_key_id=aws_access_key,
     aws_secret_access_key=aws_secret_key,
+)
+BEDROCK_IMAGE_MODEL_ID = st.secrets.get(
+    "BEDROCK_IMAGE_MODEL_ID", "amazon.nova-canvas-v1:0"
+)
+bedrock_image = boto3.client(
+    service_name="bedrock-runtime",
+    region_name=aws_region,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key,
+    config=Config(connect_timeout=10, read_timeout=300),
 )
 
 
@@ -116,12 +139,129 @@ SPIRITS = {
     },
 }
 
-# Questionnaire → spirit mapping
+# Spirit image prompt rules
+ELEMENT_RULES = {
+    "Fire": {
+        "base_colors": ["crimson", "warm amber", "soft orange-gold"],
+        "base_form": "luminous flame-like flowing abstract shape",
+        "base_movement": "flows and drifts upward continuously",
+    },
+    "Water": {
+        "base_colors": ["teal", "soft sky-blue", "silver glow"],
+        "base_form": "ribbon-like rippling abstract shape",
+        "base_movement": "flows and curves gracefully",
+    },
+    "Starlight": {
+        "base_colors": ["deep indigo", "star-silver", "pale periwinkle"],
+        "base_form": "cloud-like stardust abstract shape",
+        "base_movement": "expands and drifts outward steadily",
+    },
+    "Growth": {
+        "base_colors": ["soft moss-green", "honey-gold", "deep forest-teal"],
+        "base_form": "root-and-sprout flowing abstract shape",
+        "base_movement": "breathes and unfurls slowly",
+    },
+    "Air-Cosmic": {
+        "base_colors": ["pale lavender", "pale cyan", "moon-white"],
+        "base_form": "swirling weightless mist abstract shape",
+        "base_movement": "twirls and drifts freely",
+    },
+}
+
+PACE_RULES = {
+    "Gentle": {"speed": "slow, soft-paced", "motion_mod": "smooth long continuous flowing trails"},
+    "Steady": {"speed": "calm, consistent pace", "motion_mod": "steady continuous pulsing rhythm"},
+    "Lively": {"speed": "bright, moderately quick", "motion_mod": "lighter continuous swirling flow"},
+    "Quiet": {"speed": "very slow, subtle", "motion_mod": "barely drifting, soft faint continuous pulses"},
+}
+
+STRENGTH_RULES = {
+    "Soft-open": {"texture": "wispy, translucent, mist-like", "energy_tone": "open, tender presence"},
+    "Resilient-steady": {"texture": "dense glowing core with soft outer flow", "energy_tone": "stable, enduring presence"},
+    "Bright-passionate": {"texture": "luminous, vivid glowing edges", "energy_tone": "alive, heartfelt presence"},
+    "Wise-deep": {"texture": "layered, deep-glowing mist", "energy_tone": "calm, knowing presence"},
+}
+
+QUALITY_RULES = {
+    "Comfort": {"accent_detail": "soft rounded outward-flowing form"},
+    "Clarity": {"accent_detail": "clean defined glowing flowing lines"},
+    "Freedom": {"accent_detail": "wide outward-reaching continuous flow"},
+    "Safety": {"accent_detail": "centered, gently outward-wrapping flow"},
+}
+
+STYLE_SEED_RULES = {
+    "seed_01": {"global_style": "smooth minimal ethereal"},
+    "seed_02": {"global_style": "smoky, soft-blended ethereal"},
+    "seed_03": {"global_style": "crystalline, sharp-glow ethereal"},
+    "seed_04": {"global_style": "wispy delicate ethereal"},
+    "seed_05": {"global_style": "luminous radiant ethereal"},
+}
+
+def build_spirit_prompt(elem, pace, strength, quality, seed_key):
+    try:
+        element_rules = ELEMENT_RULES[elem]
+        pace_rules = PACE_RULES[pace]
+        strength_rules = STRENGTH_RULES[strength]
+        quality_rules = QUALITY_RULES[quality]
+        style_rules = STYLE_SEED_RULES[seed_key]
+    except KeyError as exc:
+        raise ValueError(f"Unknown spirit design option: {exc.args[0]}") from exc
+
+    return (
+        "Create an ethereal abstract spirit image, later to become a 5-second seamless forward-only loop animation.\n"
+        f"Core form: {element_rules['base_form']}, made of glowing mist and light in {', '.join(element_rules['base_colors'])}.\n"
+        f"Movement intent: {element_rules['base_movement']}, at {pace_rules['speed']}, with {pace_rules['motion_mod']}.\n"
+        f"Texture and energy: {strength_rules['texture']}, {strength_rules['energy_tone']}.\n"
+        f"Accent feature: {quality_rules['accent_detail']}.\n"
+        f"Overall style: {style_rules['global_style']}, dream-like, soft glow.\n"
+        "Composition: one centered floating abstract presence, isolated against a pure black background. Use continuous one-direction flow, designed for a seamless loop with matching start and end frames."
+    )
+
+
+SPIRIT_NEGATIVE_PROMPT = (
+    "circle, border, frame, human, face, animal, text, lettering, typography, "
+    "icon, logo, multiple subjects"
+)
+
+
+def generate_spirit_image(prompt: str) -> str:
+    if not 1 <= len(prompt) <= 1024:
+        raise ValueError("Spirit image prompt must be between 1 and 1024 characters.")
+
+    request_body = {
+        "taskType": "TEXT_IMAGE",
+        "textToImageParams": {
+            "text": prompt,
+            "negativeText": SPIRIT_NEGATIVE_PROMPT,
+            "style": "SOFT_DIGITAL_PAINTING",
+        },
+        "imageGenerationConfig": {
+            "width": 512,
+            "height": 512,
+            "quality": "standard",
+            "cfgScale": 6.5,
+            "numberOfImages": 1,
+        },
+    }
+    response = bedrock_image.invoke_model(
+        modelId=BEDROCK_IMAGE_MODEL_ID,
+        body=json.dumps(request_body),
+        contentType="application/json",
+        accept="application/json",
+    )
+    result = json.loads(response["body"].read())
+    images = result.get("images") or []
+    if not images:
+        raise RuntimeError(result.get("error", "Bedrock returned no spirit image."))
+    return images[0]
+
+# Temporary legacy display mapping until generated spirit media is connected.
 ESSENCE_MAP = {
-    "☁️ Fire&Ice": "fireice",
-    "💧 Water": "water",
-    "⭐ Starlight": "starlight",
-    "🌿 Growth": "growth",
+    "Fire": "fireice",
+    "Water": "water",
+    "Starlight": "starlight",
+    "Growth": "growth",
+    "Air-Cosmic": "fireice",
 }
 
 SPIRIT_KEY_ALIASES = {
@@ -183,6 +323,13 @@ defaults = {
     "auth_error": "",
     "auth_success": "",
     "spirit_key": None,        # which spirit the user has (Fire&Ice/water/starlight/growth)
+    "spirit_configuration": None,
+    "spirit_prompt": "",
+    "spirit_style_seed": None,
+    "spirit_image": None,
+    "spirit_storage_path": None,
+    "spirit_created_at": None,
+    "spirit_load_error": False,
     "spirit_speaking": False,  # true while Kindred is responding
     "show_questionnaire": False,
     "guest_usage_id": None,
@@ -393,6 +540,24 @@ def login(email: str, password: str):
         profile = get_profile(result.user.id)
         st.session_state.is_premium = profile.get("is_premium", False)
         st.session_state.spirit_key = profile.get("spirit_key", None)
+        st.session_state.spirit_storage_path = profile.get("spirit_storage_path")
+        st.session_state.spirit_created_at = profile.get("spirit_created_at")
+        st.session_state.spirit_configuration = profile.get("spirit_configuration")
+        st.session_state.spirit_style_seed = (
+            (st.session_state.spirit_configuration or {}).get("style_seed")
+        )
+        st.session_state.spirit_image = None
+        st.session_state.spirit_load_error = False
+        if st.session_state.spirit_storage_path:
+            try:
+                image_bytes = get_supabase_admin().storage.from_(
+                    SPIRIT_STORAGE_BUCKET
+                ).download(st.session_state.spirit_storage_path)
+                st.session_state.spirit_image = base64.b64encode(
+                    image_bytes
+                ).decode("ascii")
+            except Exception:
+                st.session_state.spirit_load_error = True
         st.session_state.usage_date = ""
         st.session_state.usage_count = 0
         st.session_state.auth_error = ""
@@ -427,7 +592,9 @@ def logout():
     supabase.auth.sign_out()
     for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text",
                 "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
-                "guest_usage_id", "usage_date", "usage_count"]:
+            "guest_usage_id", "usage_date", "usage_count", "spirit_configuration",
+                "spirit_prompt", "spirit_style_seed", "spirit_image",
+                "spirit_storage_path", "spirit_created_at", "spirit_load_error"]:
         st.session_state[key] = defaults[key]
     st.rerun()
 
@@ -442,6 +609,75 @@ def save_spirit(spirit_key: str):
             st.session_state.spirit_key = spirit_key
         except Exception:
             pass
+
+
+def save_generated_spirit(user_id: str, spirit_key: str, image_base64: str,
+                          configuration: dict) -> tuple:
+    admin = get_supabase_admin()
+    storage = admin.storage.from_(SPIRIT_STORAGE_BUCKET)
+    previous_path = get_profile(user_id).get("spirit_storage_path")
+    created_at = datetime.now(timezone.utc)
+    storage_path = f"{user_id}/{created_at.strftime('%Y%m%dT%H%M%S%fZ')}.png"
+    image_bytes = base64.b64decode(image_base64, validate=True)
+
+    storage.upload(
+        storage_path,
+        image_bytes,
+        file_options={"content-type": "image/png", "upsert": "false"},
+    )
+    try:
+        result = (
+            admin.table("profiles")
+            .update({
+                "spirit_key": spirit_key,
+                "spirit_storage_path": storage_path,
+                "spirit_created_at": created_at.isoformat(),
+                "spirit_configuration": configuration,
+            })
+            .eq("id", user_id)
+            .select("id")
+            .execute()
+        )
+        if not result.data:
+            raise RuntimeError("Could not save the spirit to the user profile.")
+    except Exception:
+        storage.remove([storage_path])
+        raise
+
+    if previous_path and previous_path != storage_path:
+        try:
+            storage.remove([previous_path])
+        except Exception:
+            pass
+
+    return storage_path, created_at.isoformat()
+
+
+def verify_spirit_storage_ready() -> None:
+    admin = get_supabase_admin()
+    admin.table("profiles").select(
+        "spirit_storage_path,spirit_created_at,spirit_configuration"
+    ).limit(1).execute()
+    admin.storage.get_bucket(SPIRIT_STORAGE_BUCKET)
+
+
+def spirit_regeneration_days_remaining() -> int:
+    created_at = st.session_state.get("spirit_created_at")
+    if not created_at:
+        return 0
+    try:
+        created_at = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return 0
+
+    remaining_seconds = (
+        created_at + timedelta(days=30) - datetime.now(timezone.utc)
+    ).total_seconds()
+    if remaining_seconds <= 0:
+        return 0
+    return int((remaining_seconds + 86399) // 86400)
 
 
 # ==========================================
@@ -542,16 +778,19 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     fallback_path = spirit["fallback"]
     animation = spirit["animation"]
 
-    # Use video if available, fall back to image
-    use_video = os.path.exists(video_path)
-    media_path = video_path if use_video else fallback_path
-
-    if not os.path.exists(media_path):
-        return
-
-    # Encode media to base64
-    with open(media_path, "rb") as f:
-        media_b64 = base64.b64encode(f.read()).decode()
+    generated_image = st.session_state.get("spirit_image")
+    if generated_image:
+        use_video = False
+        media_b64 = generated_image
+        spirit_name = "Your Kindred Spirit"
+    else:
+        use_video = os.path.exists(video_path)
+        media_path = video_path if use_video else fallback_path
+        if not os.path.exists(media_path):
+            return
+        with open(media_path, "rb") as f:
+            media_b64 = base64.b64encode(f.read()).decode()
+        spirit_name = spirit["name"]
 
     # Per-essence glow and particle colours
     essence_styles = {
@@ -576,12 +815,19 @@ def render_spirit(spirit_key: str, speaking: bool = False):
             autoplay loop muted playsinline
         ></video>
         """
+        container_class = "spirit-container"
     else:
+        media_class = "spirit-media spirit-generated" if generated_image else "spirit-media"
+        container_class = (
+            "spirit-container spirit-generated-container"
+            if generated_image
+            else "spirit-container"
+        )
         media_tag = f"""
         <img
-            class="spirit-media"
+            class="{media_class}"
             src="data:image/png;base64,{media_b64}"
-            alt="{spirit['name']}"
+            alt="{spirit_name}"
         />
         """
 
@@ -609,6 +855,10 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         margin-bottom: 4px;
         position: relative;
     }}
+    .spirit-generated-container {{
+        background: #b4b8f0;
+        isolation: isolate;
+    }}
     .spirit-media {{
         width: 300px;
         height: 300px;
@@ -621,6 +871,14 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         z-index: 2;
         filter: {speak_filter};
         transition: filter 0.6s ease;
+    }}
+    .spirit-media.spirit-generated {{
+        object-fit: contain;
+        border-radius: 0;
+        mask-image: none;
+        -webkit-mask-image: none;
+        mix-blend-mode: screen;
+        filter: brightness(1.08);
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
@@ -649,7 +907,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     }}
     </style>
 
-    <div class="spirit-container">
+    <div class="{container_class}">
         <div class="particle" style="left:18%; bottom:20%; animation-duration:3.5s; animation-delay:0s;   opacity:0.5;"></div>
         <div class="particle" style="left:72%; bottom:15%; animation-duration:4.2s; animation-delay:1s;   opacity:0.45;"></div>
         <div class="particle" style="left:50%; bottom:5%;  animation-duration:3.8s; animation-delay:0.5s; opacity:0.6;"></div>
@@ -659,7 +917,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         <div class="particle" style="left:38%; bottom:12%; animation-duration:4.8s; animation-delay:2.5s; opacity:0.3;"></div>
 
         {media_tag}
-        <div class="spirit-name">{spirit['name']}</div>
+        <div class="spirit-name">{spirit_name}</div>
         <div class="spirit-status">{"✦ present with you ✦" if not speaking else "✦ speaking ✦"}</div>
     </div>
     """
@@ -679,52 +937,103 @@ def render_questionnaire():
     st.divider()
 
     with st.form("spirit_questionnaire"):
-        st.markdown("**How do you tend to move through the world?**")
-        vibe = st.select_slider(
-            "Your natural pace",
-            options=["Gentle", "Quiet", "Peaceful", "Warm", "Hopeful", "Strong", "Restless", "Mysterious"],
-            value="Gentle",
-            label_visibility="collapsed",
-        )
-
         st.markdown("**Which element feels most like home to you?**")
         element = st.radio(
             "Your element",
-            options=["☁️ Fire&Ice", "💧 Water", "⭐ Starlight", "🌿 Growth"],
+            options=list(ELEMENT_RULES),
             horizontal=True,
             label_visibility="collapsed",
         )
 
-        st.markdown("**What do you most need from a quiet, safe space?**")
-        need = st.select_slider(
-            "Your need",
-            options=["Comfort", "Gentleness", "Peace", "Clarity", "Hope", "Strength"],
-            value="Peace",
+        st.markdown("**What pace feels most like you?**")
+        pace = st.selectbox(
+            "Your pace",
+            options=list(PACE_RULES),
             label_visibility="collapsed",
         )
 
-        st.markdown("**How do you experience your emotions?**")
-        emotion_style = st.radio(
-            "Emotion style",
-            options=[
-                "Like waves — they rise and fall",
-                "Like light — they shift and change",
-                "Like roots — they run deep and steady",
-                "Like weather — they pass through me",
-            ],
+        st.markdown("**Which quality feels closest to your inner strength?**")
+        strength = st.selectbox(
+            "Your strength",
+            options=list(STRENGTH_RULES),
             label_visibility="collapsed",
         )
 
+        st.markdown("**What would you most like your spirit to offer?**")
+        quality = st.selectbox(
+            "Your spirit's quality",
+            options=list(QUALITY_RULES),
+            label_visibility="collapsed",
+        )
+
+        days_remaining = spirit_regeneration_days_remaining()
+        if days_remaining:
+            st.info(f"You can renew your spirit in {days_remaining} days.")
+        st.caption("Creating a spirit makes one paid Bedrock image-generation request.")
         submitted = st.form_submit_button(
-            "✨ Create My Spirit", use_container_width=True, type="primary"
+            "✨ Create My Spirit" if not st.session_state.spirit_created_at
+            else "✨ Renew My Spirit",
+            use_container_width=True,
+            type="primary",
+            disabled=days_remaining > 0,
         )
 
         if submitted:
-            spirit_key = ESSENCE_MAP.get(element, "fireice")
-            save_spirit(spirit_key)
-            st.session_state.show_questionnaire = False
-            st.success(f"Your spirit has been created — {SPIRITS[spirit_key]['name']}.")
-            st.rerun()
+            if days_remaining:
+                st.info(f"You can renew your spirit in {days_remaining} days.")
+                return
+            seed_key = random.choice(list(STYLE_SEED_RULES))
+            spirit_key = ESSENCE_MAP[element]
+            configuration = {
+                "element": element,
+                "pace": pace,
+                "strength": strength,
+                "quality": quality,
+                "style_seed": seed_key,
+            }
+            spirit_prompt = build_spirit_prompt(
+                element, pace, strength, quality, seed_key
+            )
+            with st.spinner("Creating your spirit image..."):
+                try:
+                    verify_spirit_storage_ready()
+                    generated_image = generate_spirit_image(spirit_prompt)
+                    storage_path, created_at = save_generated_spirit(
+                        st.session_state.user.id,
+                        spirit_key,
+                        generated_image,
+                        configuration,
+                    )
+                    st.session_state.spirit_image = generated_image
+                    st.session_state.spirit_configuration = configuration
+                    st.session_state.spirit_style_seed = seed_key
+                    st.session_state.spirit_prompt = spirit_prompt
+                    st.session_state.spirit_storage_path = storage_path
+                    st.session_state.spirit_created_at = created_at
+                    st.session_state.spirit_load_error = False
+                    st.session_state.show_questionnaire = False
+                    st.rerun()
+                except ClientError as exc:
+                    error_code = exc.response.get("Error", {}).get("Code", "")
+                    if error_code == "AccessDeniedException":
+                        st.error(
+                            "Bedrock image access was denied. Check that Nova Canvas "
+                            "is enabled for this AWS account and region."
+                        )
+                    elif error_code == "ThrottlingException":
+                        st.error("Image generation is busy. Please wait and try again.")
+                    else:
+                        st.error(
+                            "Kindred couldn't create the spirit image. Check the Bedrock "
+                            "model ID, region, and app logs, then try again."
+                        )
+                except RuntimeError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    st.error(
+                        "Spirit storage isn't ready. Run supabase/spirit_storage.sql "
+                        "and verify the service-role secret. No image was generated."
+                    )
 
     if st.button("← Back", use_container_width=True):
         st.session_state.show_questionnaire = False
@@ -925,19 +1234,23 @@ mode_options = ["🕊️ Kindred (Ages 13+)"]
 if st.session_state.is_premium:
     mode_options.append("🌱 Kindred Kids (Up to age 12)")
 
-mode_choice = st.radio(
-    "Choose your space",
-    options=mode_options,
-    horizontal=True,
-    label_visibility="collapsed",
+st.tabs(
+    mode_options,
+    default=(
+        "🌱 Kindred Kids (Up to age 12)"
+        if st.session_state.mode == "kids" and st.session_state.is_premium
+        else mode_options[0]
+    ),
+    key="kindred_mode_tabs",
+    on_change="rerun",
 )
+mode_choice = st.session_state["kindred_mode_tabs"]
 
 new_mode = "kids" if "Kids" in mode_choice else "main"
 if new_mode != st.session_state.mode:
     st.session_state.mode = new_mode
     st.session_state.messages = []
     st.session_state.auto_speak_text = ""
-    st.rerun()
 
 if st.session_state.mode == "main":
     st.subheader("A space to say what's on your mind")
