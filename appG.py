@@ -22,13 +22,13 @@ st.markdown(
     <style>
     .stApp,
     [data-testid="stAppViewContainer"] {
-        background-color: #465064;
+        background-color: #b4b8f0;
     }
     .stApp {
-        color: #f4f0f7;
+        color: #242333;
     }
     [data-testid="stHeader"] {
-        background-color: rgba(70, 80, 100, 0.92);
+        background-color: rgba(180, 184, 240, 0.92);
     }
     </style>
     """,
