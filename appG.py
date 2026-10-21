@@ -64,7 +64,7 @@ bedrock = boto3.client(
 SPIRITS = {
     "fireice": {
         "name": "Glowing Fire&Ice",
-        "file": "spirits/fireice_pingpong.mp4",
+        "file": "spirits/FireIce_pingpong.mp4",
         "fallback": "spirits/mist_pinpong.png",
         "description": "Warm, wrapping, comforting",
         "animation": "fireice",
@@ -94,7 +94,7 @@ SPIRITS = {
 
 # Questionnaire → spirit mapping
 ESSENCE_MAP = {
-    "☁️ Fire&Ice": "FireIce",
+    "☁️ Fire&Ice": "fireice",
     "💧 Water": "water",
     "⭐ Starlight": "starlight",
     "🌿 Growth": "growth",
@@ -519,7 +519,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
 
     # Per-essence glow and particle colours
     essence_styles = {
-        "fireice":      {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffd680"},
+        "fireice":   {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffddaa"},
         "water":     {"glow": "rgba(80,  160, 255, 0.5)",  "particle_color": "#80c8ff"},
         "starlight": {"glow": "rgba(160, 180, 255, 0.5)",  "particle_color": "#c8d8ff"},
         "growth":    {"glow": "rgba(100, 200, 80,  0.5)",  "particle_color": "#90e080"},
