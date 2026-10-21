@@ -65,7 +65,7 @@ SPIRITS = {
     "fireice": {
         "name": "Glowing Fire&Ice",
         "file": "spirits/FireIce_pingpong.mp4",
-        "fallback": "spirits/mist_pinpong.png",
+        "fallback": "spirits/mist.png",
         "description": "Warm, wrapping, comforting",
         "animation": "fireice",
     },
@@ -98,6 +98,10 @@ ESSENCE_MAP = {
     "💧 Water": "water",
     "⭐ Starlight": "starlight",
     "🌿 Growth": "growth",
+}
+
+SPIRIT_KEY_ALIASES = {
+    "mist": "fireice",
 }
 
 
@@ -501,7 +505,12 @@ if not st.session_state.user:
 
 def render_spirit(spirit_key: str, speaking: bool = False):
     """Render the animated spirit component using video."""
-    spirit = SPIRITS[spirit_key]
+    spirit_key = SPIRIT_KEY_ALIASES.get(spirit_key, spirit_key)
+    spirit = SPIRITS.get(spirit_key)
+    if spirit is None:
+        st.warning("Your saved spirit isn't available. Please update your spirit to continue.")
+        return
+
     video_path = spirit["file"]
     fallback_path = spirit["fallback"]
     animation = spirit["animation"]
