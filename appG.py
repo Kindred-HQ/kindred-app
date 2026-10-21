@@ -62,12 +62,12 @@ bedrock = boto3.client(
 # SPIRIT CONFIGURATION
 # ==========================================
 SPIRITS = {
-    "mist": {
-        "name": "Glowing Mist",
-        "file": "spirits/mist_pingpong.mp4",
-        "fallback": "spirits/mist.png",
+    "fireice": {
+        "name": "Glowing Fire&Ice",
+        "file": "spirits/fireice_pingpong.mp4",
+        "fallback": "spirits/mist_pinpong.png",
         "description": "Warm, wrapping, comforting",
-        "animation": "mist",
+        "animation": "fireice",
     },
     "water": {
         "name": "Living Water",
@@ -94,7 +94,7 @@ SPIRITS = {
 
 # Questionnaire → spirit mapping
 ESSENCE_MAP = {
-    "☁️ Mist": "mist",
+    "☁️ Fire&Ice": "FireIce",
     "💧 Water": "water",
     "⭐ Starlight": "starlight",
     "🌿 Growth": "growth",
@@ -154,7 +154,7 @@ defaults = {
     "auth_view": "login",
     "auth_error": "",
     "auth_success": "",
-    "spirit_key": None,        # which spirit the user has (mist/water/starlight/growth)
+    "spirit_key": None,        # which spirit the user has (Fire&Ice/water/starlight/growth)
     "spirit_speaking": False,  # true while Kindred is responding
     "show_questionnaire": False,
     "guest_usage_id": None,
@@ -519,12 +519,12 @@ def render_spirit(spirit_key: str, speaking: bool = False):
 
     # Per-essence glow and particle colours
     essence_styles = {
-        "mist":      {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffd680"},
+        "fireice":      {"glow": "rgba(255, 210, 120, 0.5)",  "particle_color": "#ffd680"},
         "water":     {"glow": "rgba(80,  160, 255, 0.5)",  "particle_color": "#80c8ff"},
         "starlight": {"glow": "rgba(160, 180, 255, 0.5)",  "particle_color": "#c8d8ff"},
         "growth":    {"glow": "rgba(100, 200, 80,  0.5)",  "particle_color": "#90e080"},
     }
-    style = essence_styles.get(animation, essence_styles["mist"])
+    style = essence_styles.get(animation, essence_styles["fireice"])
     glow = style["glow"]
     particle_color = style["particle_color"]
 
@@ -652,7 +652,7 @@ def render_questionnaire():
         st.markdown("**Which element feels most like home to you?**")
         element = st.radio(
             "Your element",
-            options=["☁️ Mist", "💧 Water", "⭐ Starlight", "🌿 Growth"],
+            options=["☁️ Fire&Ice", "💧 Water", "⭐ Starlight", "🌿 Growth"],
             horizontal=True,
             label_visibility="collapsed",
         )
@@ -682,7 +682,7 @@ def render_questionnaire():
         )
 
         if submitted:
-            spirit_key = ESSENCE_MAP.get(element, "mist")
+            spirit_key = ESSENCE_MAP.get(element, "fireice")
             save_spirit(spirit_key)
             st.session_state.show_questionnaire = False
             st.success(f"Your spirit has been created — {SPIRITS[spirit_key]['name']}.")
