@@ -952,14 +952,17 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         transition: filter 0.6s ease;
     }}
     .spirit-media.spirit-generated {{
+        width: 255px;
+        height: 255px;
         object-fit: contain;
         border-radius: 0;
         mask-image: none;
         -webkit-mask-image: none;
         mix-blend-mode: normal;
         animation: spirit-generated-drift 6s ease-in-out infinite;
-        filter: saturate(1.25) contrast(1.12);
-        filter: url(#spirit-flow) saturate(1.25) contrast(1.12);
+        filter: saturate(1.45) contrast(1.12);
+        filter: url(#spirit-flow) saturate(1.45) contrast(1.12) brightness(1.08)
+            drop-shadow(0 0 12px {glow}) drop-shadow(0 0 26px {glow});
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
