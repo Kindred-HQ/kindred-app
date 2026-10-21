@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import html
+import io
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ import boto3
 import streamlit as st
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from PIL import Image
+from PIL import ImageChops
 from streamlit_mic_recorder import speech_to_text
 from supabase import create_client, Client
 
@@ -224,6 +227,18 @@ SPIRIT_NEGATIVE_PROMPT = (
 )
 
 
+def remove_spirit_background(image_base64: str) -> str:
+    image = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert("RGBA")
+    brightness = image.convert("RGB").convert("L")
+    background_mask = brightness.point(
+        lambda value: min(255, max(0, (value - 8) * 255 // 56))
+    )
+    image.putalpha(ImageChops.multiply(image.getchannel("A"), background_mask))
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode("ascii")
+
+
 def generate_spirit_image(prompt: str) -> str:
     if not 1 <= len(prompt) <= 10000:
         raise ValueError("Spirit image prompt must be between 1 and 10000 characters.")
@@ -244,7 +259,7 @@ def generate_spirit_image(prompt: str) -> str:
     images = result.get("images") or []
     if not images:
         raise RuntimeError(result.get("error", "Bedrock returned no spirit image."))
-    return images[0]
+    return remove_spirit_background(images[0])
 
 # Temporary legacy display mapping until generated spirit media is connected.
 ESSENCE_MAP = {
@@ -318,6 +333,7 @@ defaults = {
     "spirit_prompt": "",
     "spirit_style_seed": None,
     "spirit_image": None,
+    "spirit_image_processed": False,
     "spirit_storage_path": None,
     "spirit_created_at": None,
     "spirit_load_error": False,
@@ -538,6 +554,7 @@ def login(email: str, password: str):
             (st.session_state.spirit_configuration or {}).get("style_seed")
         )
         st.session_state.spirit_image = None
+        st.session_state.spirit_image_processed = False
         st.session_state.spirit_load_error = False
         if st.session_state.spirit_storage_path:
             try:
@@ -585,6 +602,7 @@ def logout():
                 "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
             "guest_usage_id", "usage_date", "usage_count", "spirit_configuration",
                 "spirit_prompt", "spirit_style_seed", "spirit_image",
+                "spirit_image_processed",
                 "spirit_storage_path", "spirit_created_at", "spirit_load_error"]:
         st.session_state[key] = defaults[key]
     st.rerun()
@@ -770,6 +788,10 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     animation = spirit["animation"]
 
     generated_image = st.session_state.get("spirit_image")
+    if generated_image and not st.session_state.spirit_image_processed:
+        generated_image = remove_spirit_background(generated_image)
+        st.session_state.spirit_image = generated_image
+        st.session_state.spirit_image_processed = True
     if generated_image:
         use_video = False
         media_b64 = generated_image
@@ -824,6 +846,11 @@ def render_spirit(spirit_key: str, speaking: bool = False):
 
     html_content = f"""
     <style>
+    html, body {{
+        background: transparent !important;
+        margin: 0;
+        padding: 0;
+    }}
     @keyframes spirit-float {{
         0%   {{ transform: scale(1) translateY(0px);   }}
         50%  {{ transform: scale(1.03) translateY(-8px); }}
@@ -846,10 +873,6 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         margin-bottom: 4px;
         position: relative;
     }}
-    .spirit-generated-container {{
-        background: #b4b8f0;
-        isolation: isolate;
-    }}
     .spirit-media {{
         width: 300px;
         height: 300px;
@@ -868,7 +891,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         border-radius: 0;
         mask-image: none;
         -webkit-mask-image: none;
-        mix-blend-mode: lighten;
+        mix-blend-mode: normal;
         filter: saturate(1.25) contrast(1.12);
     }}
     .spirit-name {{
@@ -996,6 +1019,7 @@ def render_questionnaire():
                         configuration,
                     )
                     st.session_state.spirit_image = generated_image
+                    st.session_state.spirit_image_processed = True
                     st.session_state.spirit_configuration = configuration
                     st.session_state.spirit_style_seed = seed_key
                     st.session_state.spirit_prompt = spirit_prompt
