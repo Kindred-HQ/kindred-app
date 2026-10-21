@@ -915,6 +915,12 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         50%  {{ transform: scale(1.03) translateY(-8px); }}
         100% {{ transform: scale(1) translateY(0px);   }}
     }}
+    @keyframes spirit-generated-drift {{
+        0%   {{ transform: translateY(1px) rotate(0deg) scale(1); }}
+        30%  {{ transform: translateY(-3px) rotate(-0.35deg) scale(1.015); }}
+        68%  {{ transform: translateY(-9px) rotate(0.3deg) scale(1.035); }}
+        100% {{ transform: translateY(1px) rotate(0deg) scale(1); }}
+    }}
     @keyframes particle-float {{
         0%   {{ transform: translateY(0px) translateX(0px); opacity: 0; }}
         20%  {{ opacity: 0.7; }}
@@ -951,6 +957,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         mask-image: none;
         -webkit-mask-image: none;
         mix-blend-mode: normal;
+        animation: spirit-generated-drift 6s ease-in-out infinite;
         filter: saturate(1.25) contrast(1.12);
         filter: url(#spirit-flow) saturate(1.25) contrast(1.12);
     }}
@@ -982,17 +989,17 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     </style>
 
     <svg aria-hidden="true" width="0" height="0" style="position:absolute">
-        <filter id="spirit-flow" x="-5%" y="-5%" width="110%" height="110%">
+        <filter id="spirit-flow" x="-12%" y="-12%" width="124%" height="124%">
             <feTurbulence
                 type="fractalNoise"
-                baseFrequency="0.008 0.018"
+            baseFrequency="0.010 0.022"
                 numOctaves="2"
                 seed="7"
                 result="flow-noise"
             >
                 <animate
                     attributeName="baseFrequency"
-                    values="0.008 0.018;0.004 0.010;0.008 0.018"
+                    values="0.010 0.022;0.005 0.012;0.010 0.022"
                     dur="8s"
                     repeatCount="indefinite"
                 />
@@ -1000,7 +1007,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
             <feDisplacementMap
                 in="SourceGraphic"
                 in2="flow-noise"
-                scale="7"
+                scale="15"
                 xChannelSelector="R"
                 yChannelSelector="G"
             />
