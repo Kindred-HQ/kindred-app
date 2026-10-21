@@ -587,8 +587,8 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         height: 300px;
         object-fit: cover;
         border-radius: 50%;
-        mask-image: radial-gradient(circle closest-side, black 55%, transparent 100%);
-        -webkit-mask-image: radial-gradient(circle closest-side, black 55%, transparent 100%);
+        mask-image: radial-gradient(circle closest-side, black 75%, transparent 100%);
+        -webkit-mask-image: radial-gradient(circle closest-side, black 75%, transparent 100%);
         animation: spirit-float {float_duration} ease-in-out infinite;
         position: relative;
         z-index: 2;
