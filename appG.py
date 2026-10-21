@@ -100,7 +100,7 @@ bedrock = boto3.client(
     aws_secret_access_key=aws_secret_key,
 )
 REPLICATE_IMAGE_MODEL = "black-forest-labs/flux-schnell"
-REPLICATE_BACKGROUND_MODEL = "cjwbw/rembg"
+REPLICATE_BACKGROUND_MODEL = "851-labs/background-remover"
 
 
 # ==========================================
@@ -302,25 +302,35 @@ def generate_spirit_image(prompt: str) -> str:
         )
 
     client = replicate.Client(api_token=api_token)
-    generated_outputs = client.run(
-        REPLICATE_IMAGE_MODEL,
-        input={
-            "prompt": f"{prompt}\nAvoid: {SPIRIT_NEGATIVE_PROMPT}.",
-            "aspect_ratio": "1:1",
-            "output_format": "png",
-            "num_outputs": 1,
-            "num_inference_steps": 4,
-        },
-    )
+    try:
+        generated_outputs = client.run(
+            REPLICATE_IMAGE_MODEL,
+            input={
+                "prompt": f"{prompt}\nAvoid: {SPIRIT_NEGATIVE_PROMPT}.",
+                "aspect_ratio": "1:1",
+                "output_format": "png",
+                "num_outputs": 1,
+                "num_inference_steps": 4,
+            },
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Replicate image generation failed: {exc}") from exc
     generated_output = next(iter(generated_outputs), None)
     if generated_output is None:
         raise RuntimeError("Replicate returned no spirit image.")
     generated_bytes = generated_output.read()
 
-    removed_background = client.run(
-        REPLICATE_BACKGROUND_MODEL,
-        input={"image": io.BytesIO(generated_bytes)},
-    )
+    try:
+        removed_background = client.run(
+            REPLICATE_BACKGROUND_MODEL,
+            input={
+                "image": io.BytesIO(generated_bytes),
+                "threshold": 0,
+                "format": "png",
+            },
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Replicate background removal failed: {exc}") from exc
     if isinstance(removed_background, (list, tuple)):
         removed_background = removed_background[0] if removed_background else None
     if removed_background is None or not hasattr(removed_background, "read"):
