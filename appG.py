@@ -235,31 +235,58 @@ def remove_spirit_background(image_base64: str) -> str:
     rgb_image = image.convert("RGB")
     width, height = image.size
     sample_radius = min(4, max(1, width // 128), max(1, height // 128))
-    corner_samples = [
-        rgb_image.getpixel((x, y))
-        for origin_x, origin_y in (
-            (0, 0),
-            (width - sample_radius, 0),
-            (0, height - sample_radius),
-            (width - sample_radius, height - sample_radius),
-        )
-        for x in range(origin_x, min(width, origin_x + sample_radius))
-        for y in range(origin_y, min(height, origin_y + sample_radius))
-    ]
-    background_color = tuple(
-        int(statistics.median(color[channel] for color in corner_samples))
-        for channel in range(3)
-    )
-    background = Image.new("RGB", image.size, background_color)
-    color_distance = ImageChops.difference(rgb_image, background).convert("L")
-    candidates = color_distance.point(lambda distance: 0 if distance <= 48 else 255)
-    connected_background = candidates.copy()
-    for edge_point in (
+    corner_origins = (
         (0, 0),
-        (width - 1, 0),
-        (0, height - 1),
-        (width - 1, height - 1),
-    ):
+        (width - sample_radius, 0),
+        (0, height - sample_radius),
+        (width - sample_radius, height - sample_radius),
+    )
+    corner_profiles = []
+    for origin_x, origin_y in corner_origins:
+        samples = [
+            rgb_image.getpixel((x, y))
+            for x in range(origin_x, min(width, origin_x + sample_radius))
+            for y in range(origin_y, min(height, origin_y + sample_radius))
+        ]
+        color = tuple(
+            int(statistics.median(sample[channel] for sample in samples))
+            for channel in range(3)
+        )
+        uniformity = statistics.median(
+            max(abs(sample[channel] - color[channel]) for channel in range(3))
+            for sample in samples
+        )
+        corner_profiles.append((color, uniformity))
+
+    def background_score(profile):
+        color, uniformity = profile
+        cluster_size = sum(
+            max(abs(other[channel] - color[channel]) for channel in range(3)) <= 32
+            for other, _ in corner_profiles
+        )
+        canvas_distance = max(
+            abs(color[channel] - (180, 184, 240)[channel])
+            for channel in range(3)
+        )
+        return cluster_size, -uniformity, -canvas_distance
+
+    background_color = max(corner_profiles, key=background_score)[0]
+    background = Image.new("RGB", image.size, background_color)
+    red_difference, green_difference, blue_difference = ImageChops.difference(
+        rgb_image, background
+    ).split()
+    color_distance = ImageChops.lighter(
+        ImageChops.lighter(red_difference, green_difference), blue_difference
+    )
+    candidates = color_distance.point(lambda distance: 0 if distance <= 60 else 255)
+    connected_background = candidates.copy()
+    edge_points = (
+        [(x, 0) for x in range(0, width, sample_radius)]
+        + [(x, height - 1) for x in range(0, width, sample_radius)]
+        + [(0, y) for y in range(0, height, sample_radius)]
+        + [(width - 1, y) for y in range(0, height, sample_radius)]
+    )
+    for edge_point in edge_points:
         if connected_background.getpixel(edge_point) == 0:
             ImageDraw.floodfill(connected_background, edge_point, 128, thresh=0)
     background_mask = connected_background.point(
