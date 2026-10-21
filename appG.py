@@ -868,8 +868,8 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         border-radius: 0;
         mask-image: none;
         -webkit-mask-image: none;
-        mix-blend-mode: screen;
-        filter: brightness(1.08);
+        mix-blend-mode: lighten;
+        filter: saturate(1.25) contrast(1.12);
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
