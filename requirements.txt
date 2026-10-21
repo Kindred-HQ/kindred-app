@@ -4,3 +4,4 @@ streamlit-mic-recorder
 supabase
 openai
 pillow
+replicate>=1.0.0
