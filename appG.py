@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import random
-import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -16,7 +15,6 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from PIL import Image
 from PIL import ImageChops
-from PIL import ImageDraw
 from PIL import ImageFilter
 from streamlit_mic_recorder import speech_to_text
 from supabase import create_client, Client
@@ -234,19 +232,25 @@ def remove_spirit_background(image_base64: str) -> str:
     image = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert("RGBA")
     rgb_image = image.convert("RGB")
     width, height = image.size
-    sample_radius = min(4, max(1, width // 128), max(1, height // 128))
+    inset = max(8, min(32, min(width, height) // 64))
+    sample_size = min(
+        64,
+        max(16, min(width, height) // 32),
+        width - 2 * inset,
+        height - 2 * inset,
+    )
     corner_origins = (
-        (0, 0),
-        (width - sample_radius, 0),
-        (0, height - sample_radius),
-        (width - sample_radius, height - sample_radius),
+        (inset, inset),
+        (width - inset - sample_size, inset),
+        (inset, height - inset - sample_size),
+        (width - inset - sample_size, height - inset - sample_size),
     )
     corner_profiles = []
     for origin_x, origin_y in corner_origins:
         samples = [
             rgb_image.getpixel((x, y))
-            for x in range(origin_x, min(width, origin_x + sample_radius))
-            for y in range(origin_y, min(height, origin_y + sample_radius))
+            for x in range(origin_x, origin_x + sample_size)
+            for y in range(origin_y, origin_y + sample_size)
         ]
         color = tuple(
             int(statistics.median(sample[channel] for sample in samples))
@@ -278,20 +282,15 @@ def remove_spirit_background(image_base64: str) -> str:
     color_distance = ImageChops.lighter(
         ImageChops.lighter(red_difference, green_difference), blue_difference
     )
-    candidates = color_distance.point(lambda distance: 0 if distance <= 60 else 255)
-    connected_background = candidates.copy()
-    edge_points = (
-        [(x, 0) for x in range(0, width, sample_radius)]
-        + [(x, height - 1) for x in range(0, width, sample_radius)]
-        + [(0, y) for y in range(0, height, sample_radius)]
-        + [(width - 1, y) for y in range(0, height, sample_radius)]
+    color_alpha = color_distance.point(
+        lambda distance: min(255, max(0, (distance - 24) * 255 // 48))
     )
-    for edge_point in edge_points:
-        if connected_background.getpixel(edge_point) == 0:
-            ImageDraw.floodfill(connected_background, edge_point, 128, thresh=0)
-    background_mask = connected_background.point(
-        lambda value: 0 if value == 128 else 255
-    ).filter(ImageFilter.GaussianBlur(radius=0.8))
+    dark_alpha = rgb_image.convert("L").point(
+        lambda brightness: min(255, max(0, (brightness - 48) * 255 // 48))
+    )
+    background_mask = ImageChops.darker(color_alpha, dark_alpha).filter(
+        ImageFilter.GaussianBlur(radius=0.8)
+    )
     image.putalpha(ImageChops.multiply(image.getchannel("A"), background_mask))
     output = io.BytesIO()
     image.save(output, format="PNG")
@@ -847,10 +846,10 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     animation = spirit["animation"]
 
     generated_image = st.session_state.get("spirit_image")
-    if generated_image and st.session_state.spirit_image_processed != 2:
+    if generated_image and st.session_state.spirit_image_processed != 3:
         generated_image = remove_spirit_background(generated_image)
         st.session_state.spirit_image = generated_image
-        st.session_state.spirit_image_processed = 2
+        st.session_state.spirit_image_processed = 3
     if generated_image:
         use_video = False
         media_b64 = generated_image
@@ -1078,7 +1077,7 @@ def render_questionnaire():
                         configuration,
                     )
                     st.session_state.spirit_image = generated_image
-                    st.session_state.spirit_image_processed = 2
+                    st.session_state.spirit_image_processed = 3
                     st.session_state.spirit_configuration = configuration
                     st.session_state.spirit_style_seed = seed_key
                     st.session_state.spirit_prompt = spirit_prompt
