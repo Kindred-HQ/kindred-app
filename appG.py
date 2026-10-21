@@ -25,10 +25,17 @@ st.markdown(
         background-color: #b4b8f0;
     }
     .stApp {
+        --background-color: #b4b8f0;
+        --text-color: #242333;
         color: #242333;
     }
     [data-testid="stHeader"] {
         background-color: rgba(180, 184, 240, 0.92);
+    }
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div,
+    [data-testid="stBottomBlockContainer"] {
+        background-color: #b4b8f0 !important;
     }
     </style>
     """,
@@ -181,6 +188,7 @@ defaults = {
     "guest_usage_id": None,
     "usage_date": "",
     "usage_count": 0,
+    "scroll_to_top_after_entry": False,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -388,6 +396,7 @@ def login(email: str, password: str):
         st.session_state.usage_date = ""
         st.session_state.usage_count = 0
         st.session_state.auth_error = ""
+        st.session_state.scroll_to_top_after_entry = True
         st.rerun()
     except Exception:
         st.session_state.auth_error = "Incorrect email or password. Please try again."
@@ -450,6 +459,7 @@ def render_auth():
         st.session_state.is_premium = False
         st.session_state.usage_date = ""
         st.session_state.usage_count = 0
+        st.session_state.scroll_to_top_after_entry = True
         st.rerun()
 
     st.divider()
@@ -1118,3 +1128,30 @@ st.caption(
     "Avoid sharing sensitive personal information. Children should use this app "
     "with guidance from a trusted adult."
 )
+
+if st.session_state.pop("scroll_to_top_after_entry", False):
+    st.components.v1.html(
+        """
+        <script>
+        function scrollAppToTop() {
+            try {
+                const parentWindow = window.parent;
+                parentWindow.scrollTo(0, 0);
+                const appView = parentWindow.document.querySelector(
+                    '[data-testid="stAppViewContainer"]'
+                );
+                const mainView = parentWindow.document.querySelector(
+                    '[data-testid="stMain"]'
+                );
+                if (appView) appView.scrollTo(0, 0);
+                if (mainView) mainView.scrollTo(0, 0);
+            } catch (error) {
+                window.parent.scrollTo(0, 0);
+            }
+        }
+        window.setTimeout(scrollAppToTop, 100);
+        window.setTimeout(scrollAppToTop, 600);
+        </script>
+        """,
+        height=0,
+    )
