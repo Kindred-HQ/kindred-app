@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
