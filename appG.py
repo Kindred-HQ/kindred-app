@@ -17,6 +17,23 @@ from supabase import create_client, Client
 # PAGE SETUP
 # ==========================================
 st.set_page_config(page_title="Kindred", page_icon="🕊️", layout="centered")
+st.markdown(
+    """
+    <style>
+    .stApp,
+    [data-testid="stAppViewContainer"] {
+        background-color: #2c2838;
+    }
+    .stApp {
+        color: #f4f0f7;
+    }
+    [data-testid="stHeader"] {
+        background-color: rgba(44, 40, 56, 0.92);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================
