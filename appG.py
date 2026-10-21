@@ -144,28 +144,28 @@ SPIRITS = {
 ELEMENT_RULES = {
     "Fire": {
         "base_colors": ["crimson", "warm amber", "soft orange-gold"],
-        "base_form": "luminous flame-like flowing abstract shape",
-        "base_movement": "flows and drifts upward continuously",
+        "base_form": "amorphous plasma haze with curling ember-bright tendrils",
+        "base_movement": "flickers, curls, and streams upward in lively currents",
     },
     "Water": {
         "base_colors": ["teal", "soft sky-blue", "silver glow"],
-        "base_form": "ribbon-like rippling abstract shape",
-        "base_movement": "flows and curves gracefully",
+        "base_form": "translucent currents and folded vapor made of liquid light",
+        "base_movement": "ripples, twists, and trails into delicate drifting wisps",
     },
     "Starlight": {
         "base_colors": ["deep indigo", "star-silver", "pale periwinkle"],
-        "base_form": "cloud-like stardust abstract shape",
-        "base_movement": "expands and drifts outward steadily",
+        "base_form": "nebular haze threaded with scattered points of stardust",
+        "base_movement": "unfurls and sheds sparkling wisps into the surrounding dark",
     },
     "Growth": {
         "base_colors": ["soft moss-green", "honey-gold", "deep forest-teal"],
-        "base_form": "root-and-sprout flowing abstract shape",
-        "base_movement": "breathes and unfurls slowly",
+        "base_form": "organic branching light-filaments with soft mossy vapor",
+        "base_movement": "breathes, branches, and unfurls in curling tendrils",
     },
     "Air-Cosmic": {
         "base_colors": ["pale lavender", "pale cyan", "moon-white"],
-        "base_form": "swirling weightless mist abstract shape",
-        "base_movement": "twirls and drifts freely",
+        "base_form": "weightless vapor with layered spiral eddies and fine filaments",
+        "base_movement": "twirls, billows, and drifts in several flowing directions",
     },
 }
 
@@ -209,13 +209,13 @@ def build_spirit_prompt(elem, pace, strength, quality, seed_key):
         raise ValueError(f"Unknown spirit design option: {exc.args[0]}") from exc
 
     return (
-        "Create an ethereal abstract spirit image, later to become a 5-second seamless forward-only loop animation.\n"
-        f"Core form: {element_rules['base_form']}, made of glowing mist and light in {', '.join(element_rules['base_colors'])}.\n"
-        f"Movement intent: {element_rules['base_movement']}, at {pace_rules['speed']}, with {pace_rules['motion_mod']}.\n"
-        f"Texture and energy: {strength_rules['texture']}, {strength_rules['energy_tone']}.\n"
-        f"Accent feature: {quality_rules['accent_detail']}.\n"
-        f"Overall style: {style_rules['global_style']}, dream-like, soft glow.\n"
-        "Composition: one centered floating abstract presence, isolated against a pure black background. Use continuous one-direction flow, designed for a seamless loop with matching start and end frames."
+        "Create a living, otherworldly spirit made from light, vapor, and energy, not a physical object.\n"
+        f"Abstract character: {element_rules['base_form']}, colored with {', '.join(element_rules['base_colors'])}. Suggest the element through color and motion, never as a literal object.\n"
+        f"Visible motion: {element_rules['base_movement']}, at {pace_rules['speed']}, with {pace_rules['motion_mod']}. Add fine trailing wisps, curling filaments, and drifting sparks so the energy feels alive.\n"
+        f"Texture and presence: {strength_rules['texture']}, {strength_rules['energy_tone']}. Keep the form translucent, softly layered, luminous, and irregular, with delicate edges that dissolve into the air.\n"
+        f"Accent: {quality_rules['accent_detail']}, expressed as flowing light rather than a solid shape.\n"
+        f"Style: {style_rules['global_style']}, dreamlike, atmospheric, and softly radiant.\n"
+        "Composition: a loose, asymmetrical, floating cloud of energy near the center, with tendrils and wisps extending naturally in different directions. No crisp outline, hard surface, geometric symmetry, or single ribbon-like silhouette. Keep the spirit luminous throughout with no black patches inside it; use pure black only as the empty background for transparency removal."
     )
 
 
