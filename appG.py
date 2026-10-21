@@ -11,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import boto3
+import replicate
 import streamlit as st
-from botocore.config import Config
 from botocore.exceptions import ClientError
 from PIL import Image
 from PIL import ImageChops
@@ -86,7 +86,6 @@ try:
     aws_access_key = st.secrets["AWS_ACCESS_KEY_ID"]
     aws_secret_key = st.secrets["AWS_SECRET_ACCESS_KEY"]
     aws_region = st.secrets.get("AWS_REGION", "eu-west-1")
-    BEDROCK_IMAGE_REGION = st.secrets.get("BEDROCK_IMAGE_REGION", "us-west-2")
 except Exception:
     st.error(
         "AWS credentials are missing. Add AWS_ACCESS_KEY_ID, "
@@ -100,14 +99,8 @@ bedrock = boto3.client(
     aws_access_key_id=aws_access_key,
     aws_secret_access_key=aws_secret_key,
 )
-BEDROCK_IMAGE_MODEL_ID = "stability.stable-image-core-v1:1"
-bedrock_image = boto3.client(
-    service_name="bedrock-runtime",
-    region_name=BEDROCK_IMAGE_REGION,
-    aws_access_key_id=aws_access_key,
-    aws_secret_access_key=aws_secret_key,
-    config=Config(connect_timeout=10, read_timeout=300),
-)
+REPLICATE_IMAGE_MODEL = "black-forest-labs/flux-schnell"
+REPLICATE_BACKGROUND_MODEL = "cjwbw/rembg"
 
 
 # ==========================================
@@ -302,23 +295,37 @@ def generate_spirit_image(prompt: str) -> str:
     if not 1 <= len(prompt) <= 10000:
         raise ValueError("Spirit image prompt must be between 1 and 10000 characters.")
 
-    request_body = {
-        "prompt": prompt,
-        "negative_prompt": SPIRIT_NEGATIVE_PROMPT,
-        "aspect_ratio": "1:1",
-        "output_format": "png",
-    }
-    response = bedrock_image.invoke_model(
-        modelId=BEDROCK_IMAGE_MODEL_ID,
-        body=json.dumps(request_body),
-        contentType="application/json",
-        accept="application/json",
+    api_token = st.secrets.get("REPLICATE_API_TOKEN")
+    if not api_token:
+        raise RuntimeError(
+            "Add REPLICATE_API_TOKEN to Streamlit secrets before creating a spirit."
+        )
+
+    client = replicate.Client(api_token=api_token)
+    generated_outputs = client.run(
+        REPLICATE_IMAGE_MODEL,
+        input={
+            "prompt": f"{prompt}\nAvoid: {SPIRIT_NEGATIVE_PROMPT}.",
+            "aspect_ratio": "1:1",
+            "output_format": "png",
+            "num_outputs": 1,
+            "num_inference_steps": 4,
+        },
     )
-    result = json.loads(response["body"].read())
-    images = result.get("images") or []
-    if not images:
-        raise RuntimeError(result.get("error", "Bedrock returned no spirit image."))
-    return remove_spirit_background(images[0])
+    generated_output = next(iter(generated_outputs), None)
+    if generated_output is None:
+        raise RuntimeError("Replicate returned no spirit image.")
+    generated_bytes = generated_output.read()
+
+    removed_background = client.run(
+        REPLICATE_BACKGROUND_MODEL,
+        input={"image": io.BytesIO(generated_bytes)},
+    )
+    if isinstance(removed_background, (list, tuple)):
+        removed_background = removed_background[0] if removed_background else None
+    if removed_background is None or not hasattr(removed_background, "read"):
+        raise RuntimeError("Replicate returned no background-removed spirit image.")
+    return base64.b64encode(removed_background.read()).decode("ascii")
 
 # Temporary legacy display mapping until generated spirit media is connected.
 ESSENCE_MAP = {
@@ -623,6 +630,7 @@ def login(email: str, password: str):
                 st.session_state.spirit_image = base64.b64encode(
                     image_bytes
                 ).decode("ascii")
+                st.session_state.spirit_image_processed = 3
             except Exception:
                 st.session_state.spirit_load_error = True
         st.session_state.usage_date = ""
@@ -1078,7 +1086,10 @@ def render_questionnaire():
         days_remaining = spirit_regeneration_days_remaining()
         if days_remaining:
             st.info(f"You can renew your spirit in {days_remaining} days.")
-        st.caption("Creating a spirit makes one paid Bedrock image-generation request.")
+        st.caption(
+            "Creating a spirit makes two paid Replicate requests: image generation "
+            "and background removal."
+        )
         submitted = st.form_submit_button(
             "✨ Create My Spirit" if not st.session_state.spirit_created_at
             else "✨ Renew My Spirit",
@@ -1123,39 +1134,13 @@ def render_questionnaire():
                     st.session_state.spirit_load_error = False
                     st.session_state.show_questionnaire = False
                     st.rerun()
-                except ClientError as exc:
-                    error_code = exc.response.get("Error", {}).get("Code", "")
-                    logging.exception(
-                        "Spirit image request failed in %s with %s",
-                        BEDROCK_IMAGE_REGION,
-                        error_code,
-                    )
-                    if error_code == "AccessDeniedException":
-                        st.error(
-                            "Bedrock denied Stable Image Core access. Check model access "
-                            "and bedrock:InvokeModel permissions in "
-                            f"{BEDROCK_IMAGE_REGION}."
-                        )
-                    elif error_code == "ThrottlingException":
-                        st.error("Image generation is busy. Please wait and try again.")
-                    elif error_code == "ResourceNotFoundException":
-                        st.error(
-                            "Stable Image Core wasn't found in "
-                            f"{BEDROCK_IMAGE_REGION}. Check the image region and "
-                            "confirm that this model is enabled for the AWS account."
-                        )
-                    else:
-                        st.error(
-                            "Bedrock rejected the spirit image request "
-                            f"({error_code or 'unknown error'}). Check the Streamlit "
-                            "app logs for details."
-                        )
                 except RuntimeError as exc:
                     st.error(str(exc))
                 except Exception:
+                    logging.exception("Replicate spirit generation or save failed")
                     st.error(
-                        "Spirit storage isn't ready. Run supabase/spirit_storage.sql "
-                        "and verify the service-role secret. No image was generated."
+                        "Could not create or save your spirit. Check the Replicate token "
+                        "and Supabase storage setup; see the app logs for details."
                     )
 
     if st.button("← Back", use_container_width=True):
