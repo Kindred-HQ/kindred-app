@@ -943,8 +943,6 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     # Speaking state changes animation speed and glow intensity
     speak_filter = f"drop-shadow(0 0 32px {glow}) drop-shadow(0 0 12px {glow}) brightness(1.3)" if speaking else f"drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow})"
     float_duration = "2s" if speaking else "4s"
-    glow_duration = "2.2s" if speaking else "4.5s"
-    glow_opacity = "0.9" if speaking else "0.62"
 
     if use_video:
         media_tag = f"""
@@ -988,10 +986,6 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         68%  {{ transform: translateY(-9px) rotate(0.3deg) scale(1.035); }}
         100% {{ transform: translateY(1px) rotate(0deg) scale(1); }}
     }}
-    @keyframes spirit-generated-glow {{
-        0%, 100% {{ transform: scale(0.88); opacity: 0.55; }}
-        50%      {{ transform: scale(1.08); opacity: 1; }}
-    }}
     @keyframes particle-float {{
         0%   {{ transform: translateY(0px) translateX(0px); opacity: 0; }}
         20%  {{ opacity: 0.7; }}
@@ -1031,23 +1025,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         -webkit-mask-image: none;
         mix-blend-mode: normal;
         animation: spirit-generated-drift 4.5s ease-in-out infinite;
-        filter: url(#spirit-flow) saturate(1.4) contrast(1.2) brightness(1.05)
-                drop-shadow(0 0 8px {glow}) drop-shadow(0 0 20px {glow});
-    }}
-    .spirit-generated-container::before {{
-        content: "";
-        position: absolute;
-        top: 18px;
-        left: calc(50% - 115px);
-        width: 230px;
-        height: 230px;
-        border-radius: 50%;
-        background: radial-gradient(ellipse, {glow} 0%, transparent 70%);
-        filter: blur(22px);
-        opacity: {glow_opacity};
-        animation: spirit-generated-glow {glow_duration} ease-in-out infinite;
-        pointer-events: none;
-        z-index: 1;
+        filter: url(#spirit-flow) saturate(1.28) contrast(1.12);
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
