@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import html
 import io
 import json
 import logging
@@ -514,6 +513,7 @@ defaults = {
     "auto_speak_text": "",
     "voice_reply_id": "",
     "last_voice_event_id": "",
+    "voice_notice": "",
     "user": None,
     "is_premium": False,
     "auth_view": "login",
@@ -748,7 +748,9 @@ def logout():
     supabase.auth.sign_out()
     for key in [
         "user", "is_premium", "messages", "spirit_generated", "spirit_text",
-        "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
+        "auto_speak_text", "voice_listening", "voice_name", "voice_reply_id",
+        "last_voice_event_id", "voice_notice", "spirit_key", "spirit_speaking",
+        "show_questionnaire",
         "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
         "spirit_image", "spirit_image_processed", "spirit_storage_path",
         "spirit_created_at", "spirit_load_error",
@@ -1255,32 +1257,34 @@ def render_questionnaire():
 # ==========================================
 # HELPERS
 # ==========================================
-def auto_speak(text: str, speed: float) -> None:
-    safe_text = html.escape(text, quote=True)
-    st.components.v1.html(f"""
-    <script>
-    (function() {{
-      if (!("speechSynthesis" in window)) return;
-      window.speechSynthesis.cancel();
-      var u = new SpeechSynthesisUtterance("{safe_text}");
-      u.lang = "en-ZA";
-      u.rate = {float(speed)};
-      setTimeout(function() {{ window.speechSynthesis.speak(u); }}, 400);
-    }})();
-    </script>
-    """, height=0)
+def _json_for_script(value: str) -> str:
+    return (
+        json.dumps(value, ensure_ascii=True)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
 
 
-def show_replay_button(text: str, speed: float, key: str) -> None:
-    safe_text = html.escape(text, quote=True)
+def show_replay_button(
+    text: str, speed: float, key: str, voice_name: str = ""
+) -> None:
+    text_json = _json_for_script(text)
+    voice_json = _json_for_script(voice_name)
     st.components.v1.html(f"""
     <div id="kr-{key}">
-      <span style="display:none">{safe_text}</span>
       <button onclick="(function(){{
-        var t=document.querySelector('#kr-{key} span').textContent;
+        if (!('speechSynthesis' in window)) return;
+        var u = new SpeechSynthesisUtterance({text_json});
+        var voiceName = {voice_json};
+        u.lang = 'en-ZA';
+        u.rate = {float(speed)};
+        var voices = window.speechSynthesis.getVoices();
+        u.voice = voices.find(function(v) {{ return v.name === voiceName; }})
+          || voices.find(function(v) {{ return v.lang.toLowerCase() === 'en-za'; }})
+          || voices.find(function(v) {{ return v.lang.toLowerCase().indexOf('en-') === 0; }})
+          || null;
         window.speechSynthesis.cancel();
-        var u=new SpeechSynthesisUtterance(t);
-        u.lang='en-ZA'; u.rate={float(speed)};
         window.speechSynthesis.speak(u);
       }})()"
         style="background:transparent;border:0;color:#aaa;cursor:pointer;
@@ -1480,7 +1484,12 @@ for index, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg["role"] == "assistant":
-            show_replay_button(msg["content"], st.session_state.voice_speed, f"h{index}")
+            show_replay_button(
+                msg["content"],
+                st.session_state.voice_speed,
+                f"h{index}",
+                st.session_state.voice_name,
+            )
 
 
 # ==========================================
@@ -1495,18 +1504,45 @@ if chat_capped:
     else:
         render_free_cap_notice()
 else:
-    st.markdown("🎤 **Voice** — click Start, speak, click Stop when done")
-
-voice_transcript = None
-if not chat_capped:
-    voice_transcript = speech_to_text(
-        language="en-ZA",
-        start_prompt="🎤 Start speaking",
-        stop_prompt="⏹ Done — send",
-        just_once=True,
-        use_container_width=True,
-        key="kindred_stt",
+    st.markdown(
+        "🎤 **Voice** — turn on listening, say “Hey Kindred,” then speak. "
+        "Kindred sends your message after a short pause."
     )
+
+voice_event = {}
+voice_transcript = None
+voice_event_id = ""
+if chat_capped:
+    st.session_state.voice_listening = False
+else:
+    voice_event = kindred_voice_component(
+        listening=st.session_state.voice_listening,
+        disabled=False,
+        selected_voice=st.session_state.voice_name,
+        reply_id=st.session_state.voice_reply_id,
+        reply_text=st.session_state.auto_speak_text,
+        voice_speed=st.session_state.voice_speed,
+        default={},
+        key="kindred_voice",
+    )
+    if isinstance(voice_event, dict):
+        if "listening" in voice_event:
+            st.session_state.voice_listening = bool(voice_event["listening"])
+        if "selected_voice" in voice_event:
+            st.session_state.voice_name = str(voice_event["selected_voice"] or "")
+        if (
+            voice_event.get("reply_done")
+            and voice_event["reply_done"] == st.session_state.voice_reply_id
+        ):
+            st.session_state.auto_speak_text = ""
+        if voice_event.get("error"):
+            st.session_state.voice_notice = str(voice_event["error"])
+        voice_transcript = voice_event.get("transcript")
+        voice_event_id = str(voice_event.get("event_id") or "")
+
+if st.session_state.get("voice_notice"):
+    st.warning(st.session_state.voice_notice)
+    st.session_state.voice_notice = ""
 
 
 # ==========================================
@@ -1520,12 +1556,20 @@ user_input = st.chat_input(
 )
 
 used_voice = False
-if voice_transcript and not user_input:
-    user_input = voice_transcript
-    used_voice = True
+if (
+    voice_transcript
+    and voice_event_id
+    and voice_event_id != st.session_state.last_voice_event_id
+):
+    st.session_state.last_voice_event_id = voice_event_id
+    if not user_input:
+        user_input = str(voice_transcript).strip()
+        used_voice = bool(user_input)
 
 if user_input:
     if not consume_free_message():
+        if used_voice:
+            st.session_state.auto_speak_text = ""
         if st.session_state.quota_error:
             render_quota_unavailable()
         else:
@@ -1554,22 +1598,36 @@ if user_input:
                 if full_response.strip():
                     response_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    show_replay_button(full_response, st.session_state.voice_speed, "latest")
+                    show_replay_button(
+                        full_response,
+                        st.session_state.voice_speed,
+                        "latest",
+                        st.session_state.voice_name,
+                    )
                     if used_voice:
                         st.session_state.auto_speak_text = full_response
                 else:
                     response_placeholder.empty()
                     st.warning("The AI returned an empty response. Please try again.")
+                    if used_voice:
+                        st.session_state.auto_speak_text = ""
+                        st.session_state.voice_notice = (
+                            "Kindred returned an empty response. Please try speaking again."
+                        )
             except Exception as exc:
                 response_placeholder.empty()
-                st.error(get_error_message(exc))
+                if used_voice:
+                    st.session_state.auto_speak_text = ""
+                    st.session_state.voice_notice = get_error_message(exc)
+                else:
+                    st.error(get_error_message(exc))
             finally:
                 # Return spirit to idle after response
                 st.session_state.spirit_speaking = False
 
-if st.session_state.auto_speak_text:
-    auto_speak(st.session_state.auto_speak_text, st.session_state.voice_speed)
-    st.session_state.auto_speak_text = ""
+if used_voice:
+    st.session_state.voice_reply_id = voice_event_id
+    st.rerun()
 
 
 # ==========================================
