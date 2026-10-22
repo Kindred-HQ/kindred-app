@@ -517,6 +517,10 @@ defaults = {
     "voice_listening": False,
     "voice_name": "",
     "voice_conversation_mode": False,
+    "voice_tts_speaking": False,
+    "voice_replay_counter": 0,
+    "voice_replay_id": "",
+    "voice_replay_text": "",
     "auto_speak_text": "",
     "voice_reply_id": "",
     "last_voice_event_id": "",
@@ -756,7 +760,8 @@ def logout():
     for key in [
         "user", "is_premium", "messages", "spirit_generated", "spirit_text",
         "auto_speak_text", "voice_listening", "voice_name", "voice_conversation_mode",
-        "voice_reply_id",
+        "voice_tts_speaking", "voice_replay_counter", "voice_replay_id",
+        "voice_replay_text", "voice_reply_id",
         "last_voice_event_id", "voice_notice", "spirit_key", "spirit_speaking",
         "show_questionnaire",
         "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
@@ -1016,6 +1021,9 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         />
         """
 
+    if speaking:
+        container_class += " spirit-speaking"
+
     html_content = f"""
     <style>
     html, body {{
@@ -1040,6 +1048,10 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         80%  {{ opacity: 0.3; }}
         100% {{ transform: translateY(-50px) translateX(15px); opacity: 0; }}
     }}
+    @keyframes spirit-voice-pulse {{
+        0%, 100% {{ transform: translateX(-50%) scale(0.82); opacity: 0.25; }}
+        50% {{ transform: translateX(-50%) scale(1.12); opacity: 0.8; }}
+    }}
 
     .spirit-container {{
         display: flex;
@@ -1050,6 +1062,20 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         padding: 0;
         margin: 0;
         position: relative;
+    }}
+    .spirit-container.spirit-speaking::before {{
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: 250px;
+        height: 250px;
+        border-radius: 50%;
+        background: radial-gradient(circle, {glow} 0%, transparent 72%);
+        filter: blur(14px);
+        animation: spirit-voice-pulse 1.15s ease-in-out infinite;
+        pointer-events: none;
+        z-index: 1;
     }}
     .spirit-media {{
         width: 250px;
@@ -1280,54 +1306,13 @@ def render_questionnaire():
 # ==========================================
 # HELPERS
 # ==========================================
-def _json_for_script(value: str) -> str:
-    return (
-        json.dumps(value, ensure_ascii=True)
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("&", "\\u0026")
-    )
-
-
-def show_replay_button(
-    text: str, speed: float, key: str, voice_name: str = ""
-) -> None:
-    text_json = _json_for_script(text)
-    voice_json = _json_for_script(voice_name)
-    st.components.v1.html(f"""
-    <div id="kr-{key}">
-      <button data-playing="false" onclick="(function(button){{
-        if (!('speechSynthesis' in window)) return;
-        if (button.dataset.playing === 'true') {{
-          window.speechSynthesis.cancel();
-          button.dataset.playing = 'false';
-          button.textContent = '🔊 Replay';
-          return;
-        }}
-        var u = new SpeechSynthesisUtterance({text_json});
-        var voiceName = {voice_json};
-        u.lang = 'en-ZA';
-        u.rate = {float(speed)};
-        var voices = window.speechSynthesis.getVoices();
-        u.voice = voices.find(function(v) {{ return v.name === voiceName; }})
-          || voices.find(function(v) {{ return v.lang.toLowerCase() === 'en-za'; }})
-          || voices.find(function(v) {{ return v.lang.toLowerCase().indexOf('en-') === 0; }})
-          || null;
-        window.speechSynthesis.cancel();
-        button.dataset.playing = 'true';
-        button.textContent = '⏹ Stop';
-        u.onend = u.onerror = function() {{
-          button.dataset.playing = 'false';
-          button.textContent = '🔊 Replay';
-        }};
-        window.speechSynthesis.speak(u);
-      }})(this)"
-        style="background:transparent;border:0;color:#aaa;cursor:pointer;
-               font-size:12px;padding:2px 4px;">
-        🔊 Replay
-      </button>
-    </div>
-    """, height=28)
+def show_replay_button(text: str, key: str) -> None:
+    if st.button("🔊 Replay", key=f"replay_{key}"):
+        st.session_state.voice_replay_counter += 1
+        st.session_state.voice_replay_id = str(
+            st.session_state.voice_replay_counter
+        )
+        st.session_state.voice_replay_text = text
 
 
 def call_bedrock_stream(system_prompt: str, messages: list, placeholder, max_tokens: int = 400) -> str:
@@ -1449,7 +1434,10 @@ if st.session_state.is_premium:
     if st.session_state.spirit_key:
         render_spirit(
             st.session_state.spirit_key,
-            speaking=st.session_state.spirit_speaking
+            speaking=(
+                st.session_state.spirit_speaking
+                or st.session_state.voice_tts_speaking
+            ),
         )
         col_spirit1, col_spirit2 = st.columns([3, 1])
         with col_spirit2:
@@ -1519,12 +1507,7 @@ for index, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg["role"] == "assistant" and st.session_state.is_premium:
-            show_replay_button(
-                msg["content"],
-                st.session_state.voice_speed,
-                f"h{index}",
-                st.session_state.voice_name,
-            )
+            show_replay_button(msg["content"], f"h{index}")
 
 
 # ==========================================
@@ -1552,6 +1535,8 @@ voice_event_id = ""
 if not st.session_state.is_premium:
     st.session_state.voice_listening = False
     st.session_state.voice_conversation_mode = False
+    st.session_state.voice_tts_speaking = False
+    st.session_state.voice_replay_text = ""
     st.session_state.auto_speak_text = ""
     st.session_state.voice_notice = ""
 else:
@@ -1562,6 +1547,8 @@ else:
         selected_voice=st.session_state.voice_name,
         reply_id=st.session_state.voice_reply_id,
         reply_text=st.session_state.auto_speak_text,
+        replay_id=st.session_state.voice_replay_id,
+        replay_text=st.session_state.voice_replay_text,
         voice_speed=st.session_state.voice_speed,
         default={},
         key="kindred_voice",
@@ -1575,11 +1562,20 @@ else:
             st.session_state.voice_conversation_mode = bool(
                 voice_event["conversation_mode"]
             )
+        if "tts_speaking" in voice_event:
+            st.session_state.voice_tts_speaking = bool(
+                voice_event["tts_speaking"]
+            )
         if (
             voice_event.get("reply_done")
             and voice_event["reply_done"] == st.session_state.voice_reply_id
         ):
             st.session_state.auto_speak_text = ""
+        if (
+            voice_event.get("replay_done")
+            and voice_event["replay_done"] == st.session_state.voice_replay_id
+        ):
+            st.session_state.voice_replay_text = ""
         if voice_event.get("error"):
             st.session_state.voice_notice = str(voice_event["error"])
         voice_transcript = voice_event.get("transcript")
@@ -1644,12 +1640,7 @@ if user_input:
                     response_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
                     if st.session_state.is_premium:
-                        show_replay_button(
-                            full_response,
-                            st.session_state.voice_speed,
-                            "latest",
-                            st.session_state.voice_name,
-                        )
+                        show_replay_button(full_response, "latest")
                     if used_voice:
                         st.session_state.auto_speak_text = full_response
                 else:
