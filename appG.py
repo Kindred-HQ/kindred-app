@@ -98,6 +98,13 @@ st.markdown(
     [data-testid="stBottomBlockContainer"] {
         background-color: #b4b8f0 !important;
     }
+    .st-key-logout_button button,
+    .st-key-update_spirit_button button {
+        width: 50% !important;
+        min-height: 0;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.85rem;
+    }
     </style>
     <svg aria-hidden="true" width="0" height="0" style="position:absolute">
         <filter id="kindred-whisper-flow" x="-15%" y="-15%" width="130%" height="130%">
@@ -996,6 +1003,9 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     # Speaking state changes animation speed and glow intensity
     speak_filter = f"drop-shadow(0 0 32px {glow}) drop-shadow(0 0 12px {glow}) brightness(1.3)" if speaking else f"drop-shadow(0 0 24px {glow}) drop-shadow(0 0 8px {glow})"
     float_duration = "2s" if speaking else "4s"
+    generated_filter = "url(#spirit-flow) saturate(1.28) contrast(1.12)"
+    if speaking:
+        generated_filter += f" drop-shadow(0 0 32px {glow}) drop-shadow(0 0 12px {glow}) brightness(1.3)"
 
     if use_video:
         media_tag = f"""
@@ -1049,8 +1059,8 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         100% {{ transform: translateY(-50px) translateX(15px); opacity: 0; }}
     }}
     @keyframes spirit-voice-pulse {{
-        0%, 100% {{ transform: translateX(-50%) scale(0.82); opacity: 0.25; }}
-        50% {{ transform: translateX(-50%) scale(1.12); opacity: 0.8; }}
+        0%, 100% {{ transform: translate(-50%, -50%) scale(0.82); opacity: 0.25; }}
+        50% {{ transform: translate(-50%, -50%) scale(1.12); opacity: 0.8; }}
     }}
 
     .spirit-container {{
@@ -1066,16 +1076,16 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     .spirit-container.spirit-speaking::before {{
         content: "";
         position: absolute;
-        top: 0;
+        top: 50%;
         left: 50%;
-        width: 250px;
-        height: 250px;
+        width: 290px;
+        height: 290px;
         border-radius: 50%;
-        background: radial-gradient(circle, {glow} 0%, transparent 72%);
+        background: radial-gradient(circle, transparent 42%, {glow} 58%, transparent 76%);
         filter: blur(14px);
         animation: spirit-voice-pulse 1.15s ease-in-out infinite;
         pointer-events: none;
-        z-index: 1;
+        z-index: 3;
     }}
     .spirit-media {{
         width: 250px;
@@ -1099,7 +1109,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         -webkit-mask-image: none;
         mix-blend-mode: normal;
         animation: spirit-generated-drift 4.5s ease-in-out infinite;
-        filter: url(#spirit-flow) saturate(1.28) contrast(1.12);
+        filter: {generated_filter};
     }}
     .spirit-name {{
         color: rgba(255,255,255,0.4);
@@ -1403,7 +1413,11 @@ col_brand, col_logout = st.columns([4, 1], vertical_alignment="center")
 with col_brand:
     render_brand_header()
 with col_logout:
-    if st.button("Log out" if not is_guest else "Exit", use_container_width=True):
+    if st.button(
+        "Log out" if not is_guest else "Exit",
+        use_container_width=True,
+        key="logout_button",
+    ):
         logout()
 
 if is_guest:
@@ -1441,7 +1455,11 @@ if st.session_state.is_premium:
         )
         col_spirit1, col_spirit2 = st.columns([3, 1])
         with col_spirit2:
-            if st.button("✦ Update Spirit", use_container_width=True):
+            if st.button(
+                "✦ Update Spirit",
+                use_container_width=True,
+                key="update_spirit_button",
+            ):
                 st.session_state.show_questionnaire = True
                 st.rerun()
     else:
