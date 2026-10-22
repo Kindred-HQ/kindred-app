@@ -34,12 +34,6 @@ st.set_page_config(page_title="Kindred", page_icon=BRAND_LOGO, layout="centered"
 st.markdown(
     """
     <style>
-    @keyframes kindred-whisper-drift {
-        0% { transform: translateY(1px) scale(1); }
-        30% { transform: translateY(-3px) scale(1.015); }
-        68% { transform: translateY(-7px) scale(1.035); }
-        100% { transform: translateY(1px) scale(1); }
-    }
     .kindred-brand {
         display: flex;
         align-items: center;
@@ -50,7 +44,6 @@ st.markdown(
         width: 48px;
         height: 52px;
         object-fit: contain;
-        animation: kindred-whisper-drift 4.5s ease-in-out infinite;
         filter: url(#kindred-whisper-flow) drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
     }
     .kindred-brand span {
