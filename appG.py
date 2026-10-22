@@ -721,7 +721,21 @@ def verify_spirit_storage_ready() -> None:
     admin.storage.get_bucket(SPIRIT_STORAGE_BUCKET)
 
 
+def spirit_cooldown_bypass_enabled() -> bool:
+    user = st.session_state.user
+    user_id = getattr(user, "id", None)
+    bypass_user_id = st.secrets.get("SPIRIT_COOLDOWN_BYPASS_USER_ID")
+    return bool(
+        user_id
+        and bypass_user_id
+        and hmac.compare_digest(str(user_id), str(bypass_user_id).strip())
+    )
+
+
 def spirit_regeneration_days_remaining() -> int:
+    if spirit_cooldown_bypass_enabled():
+        return 0
+
     created_at = st.session_state.get("spirit_created_at")
     if not created_at:
         return 0
@@ -1074,7 +1088,9 @@ def render_questionnaire():
         )
 
         days_remaining = spirit_regeneration_days_remaining()
-        if days_remaining:
+        if spirit_cooldown_bypass_enabled():
+            st.info("Owner testing access is enabled: you can regenerate your spirit anytime.")
+        elif days_remaining:
             st.info(f"You can renew your spirit in {days_remaining} days.")
         st.caption(
             "Creating a spirit makes two paid Replicate requests: image generation "
