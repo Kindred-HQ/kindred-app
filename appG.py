@@ -102,8 +102,6 @@ bedrock = boto3.client(
     aws_secret_access_key=aws_secret_key,
 )
 REPLICATE_IMAGE_MODEL = "black-forest-labs/flux-schnell"
-REPLICATE_ANIMATION_MODEL = "prunaai/p-video"
-SPIRIT_ANIMATION_PREVIEW_ESTIMATED_COST = 0.025
 REPLICATE_BACKGROUND_MODEL = (
     "851-labs/background-remover:"
     "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc"
@@ -357,60 +355,6 @@ def generate_spirit_image(prompt: str) -> str:
     return base64.b64encode(removed_background.read()).decode("ascii")
 
 
-def generate_spirit_animation(image_base64: str) -> bytes:
-    api_token = st.secrets.get("REPLICATE_API_TOKEN")
-    if not api_token:
-        raise RuntimeError(
-            "Add REPLICATE_API_TOKEN to Streamlit secrets before animating a spirit."
-        )
-
-    try:
-        image = Image.open(
-            io.BytesIO(base64.b64decode(image_base64, validate=True))
-        ).convert("RGBA")
-        black_background = Image.new("RGBA", image.size, (0, 0, 0, 255))
-        black_background.alpha_composite(image)
-        image_file = io.BytesIO()
-        black_background.convert("RGB").save(image_file, format="PNG")
-        image_file.seek(0)
-    except Exception as exc:
-        raise ValueError("The saved spirit image could not be prepared for animation.") from exc
-
-    client = replicate.Client(api_token=api_token)
-    try:
-        output = client.run(
-            REPLICATE_ANIMATION_MODEL,
-            input={
-                "prompt": (
-                    "Animate the exact abstract luminous spirit in the input image. "
-                    "Keep its shape, colors, scale, and centered framing consistent. "
-                    "Create subtle organic motion: translucent smoke gently curling, "
-                    "fine light filaments drifting, a soft inner glow breathing, and "
-                    "tiny nearby particles softly shimmering. Keep the camera locked; "
-                    "do not add a scene, objects, text, sound, or extra subjects. "
-                    "Keep the background solid black."
-                ),
-                "image": image_file,
-                "duration": 5,
-                "resolution": "720p",
-                "fps": 24,
-                "draft": True,
-                "prompt_upsampling": False,
-            },
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Replicate spirit animation failed: {exc}") from exc
-
-    if isinstance(output, (list, tuple)):
-        output = output[0] if output else None
-    if output is None or not hasattr(output, "read"):
-        raise RuntimeError("Replicate returned no readable spirit animation.")
-    video_bytes = output.read()
-    if not video_bytes:
-        raise RuntimeError("Replicate returned an empty spirit animation.")
-    return video_bytes
-
-
 # Temporary legacy display mapping until generated spirit media is connected.
 ESSENCE_MAP = {
     "Fire": "fireice",
@@ -484,7 +428,6 @@ defaults = {
     "spirit_style_seed": None,
     "spirit_image": None,
     "spirit_image_processed": 0,
-    "spirit_animation_video": None,
     "spirit_storage_path": None,
     "spirit_created_at": None,
     "spirit_load_error": False,
@@ -663,7 +606,6 @@ def login(email: str, password: str):
         )
         st.session_state.spirit_image = None
         st.session_state.spirit_image_processed = 0
-        st.session_state.spirit_animation_video = None
         st.session_state.spirit_load_error = False
         if st.session_state.spirit_storage_path:
             try:
@@ -711,8 +653,7 @@ def logout():
         "user", "is_premium", "messages", "spirit_generated", "spirit_text",
         "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
         "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
-        "spirit_image", "spirit_image_processed", "spirit_animation_video",
-        "spirit_storage_path",
+        "spirit_image", "spirit_image_processed", "spirit_storage_path",
         "spirit_created_at", "spirit_load_error",
     ]:
         st.session_state[key] = defaults[key]
@@ -1192,7 +1133,6 @@ def render_questionnaire():
                     )
                     st.session_state.spirit_image = generated_image
                     st.session_state.spirit_image_processed = 3
-                    st.session_state.spirit_animation_video = None
                     st.session_state.spirit_configuration = configuration
                     st.session_state.spirit_style_seed = seed_key
                     st.session_state.spirit_prompt = spirit_prompt
@@ -1380,49 +1320,6 @@ if st.session_state.is_premium:
             if st.button("✦ Update Spirit", use_container_width=True):
                 st.session_state.show_questionnaire = True
                 st.rerun()
-        if spirit_cooldown_bypass_enabled():
-            with st.expander("🧪 Test Replicate spirit animation"):
-                st.caption(
-                    "Generates a 5-second, 720p draft preview. Estimated cost: "
-                    f"${SPIRIT_ANIMATION_PREVIEW_ESTIMATED_COST:.3f}. "
-                    "This test preview uses a black background and does not replace "
-                    "your transparent spirit."
-                )
-                if not st.session_state.spirit_image:
-                    st.info("Create a generated spirit image before testing animation.")
-                confirmed = st.checkbox(
-                    "I understand this uses Replicate credits.",
-                    key="confirm_spirit_animation_cost",
-                )
-                if st.button(
-                    "Generate animation preview",
-                    use_container_width=True,
-                    disabled=not confirmed or not st.session_state.spirit_image,
-                ):
-                    with st.spinner("Animating your spirit with Replicate..."):
-                        try:
-                            st.session_state.spirit_animation_video = (
-                                generate_spirit_animation(
-                                    st.session_state.spirit_image
-                                )
-                            )
-                        except Exception:
-                            logging.exception("Replicate spirit animation preview failed")
-                            st.error(
-                                "Could not generate the animation preview. See the "
-                                "app logs for details; check the Replicate token and "
-                                "model availability."
-                            )
-                        else:
-                            st.success("Animation preview generated.")
-                if st.session_state.spirit_animation_video:
-                    st.video(
-                        st.session_state.spirit_animation_video,
-                        format="video/mp4",
-                        loop=True,
-                        autoplay=True,
-                        muted=True,
-                    )
     else:
         # Premium user hasn't created their spirit yet
         st.markdown(
