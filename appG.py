@@ -1049,9 +1049,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         background: transparent;
         padding: 0;
         margin: 0;
-        position: sticky;
-        top: 0;
-        z-index: 5;
+        position: relative;
     }}
     .spirit-media {{
         width: 250px;
@@ -1143,9 +1141,24 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         <div class="spirit-name">{spirit_name}</div>
         <div class="spirit-status">{"✦ present with you ✦" if not speaking else "✦ speaking ✦"}</div>
     </div>
+    <script>
+    (() => {{
+        let stickyHost = window.frameElement;
+        while (stickyHost && stickyHost.dataset.testid !== "stElementContainer") {{
+            stickyHost = stickyHost.parentElement;
+        }}
+        if (stickyHost) {{
+            stickyHost.style.position = "sticky";
+            stickyHost.style.top = "8px";
+            stickyHost.style.zIndex = "10";
+            stickyHost.style.background = "#b4b8f0";
+        }}
+    }})();
+    </script>
     """
 
-    st.html(html_content)
+    component_height = 270 if generated_image else 300
+    st.components.v1.html(html_content, height=component_height)
 
 
 # ==========================================
@@ -1285,14 +1298,14 @@ def show_replay_button(
     <div id="kr-{key}">
       <button data-playing="false" onclick="(function(button){{
         if (!('speechSynthesis' in window)) return;
-    if (button.dataset.playing === 'true') {{
-      window.speechSynthesis.cancel();
-      button.dataset.playing = 'false';
-      button.textContent = '🔊 Replay';
-      return;
-    }}
-    var u = new SpeechSynthesisUtterance({text_json});
-    var voiceName = {voice_json};
+        if (button.dataset.playing === 'true') {{
+          window.speechSynthesis.cancel();
+          button.dataset.playing = 'false';
+          button.textContent = '🔊 Replay';
+          return;
+        }}
+        var u = new SpeechSynthesisUtterance({text_json});
+        var voiceName = {voice_json};
         u.lang = 'en-ZA';
         u.rate = {float(speed)};
         var voices = window.speechSynthesis.getVoices();
