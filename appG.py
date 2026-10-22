@@ -546,7 +546,6 @@ defaults = {
     "spirit_storage_path": None,
     "spirit_created_at": None,
     "spirit_load_error": False,
-    "spirit_speaking": False,  # true while Kindred is responding
     "show_questionnaire": False,
     "quota_error": "",
     "scroll_to_top_after_entry": False,
@@ -769,7 +768,7 @@ def logout():
         "auto_speak_text", "voice_listening", "voice_name", "voice_conversation_mode",
         "voice_tts_speaking", "voice_replay_counter", "voice_replay_id",
         "voice_replay_text", "voice_reply_id",
-        "last_voice_event_id", "voice_notice", "spirit_key", "spirit_speaking",
+        "last_voice_event_id", "voice_notice", "spirit_key",
         "show_questionnaire",
         "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
         "spirit_image", "spirit_image_processed", "spirit_storage_path",
@@ -1448,10 +1447,7 @@ if st.session_state.is_premium:
     if st.session_state.spirit_key:
         render_spirit(
             st.session_state.spirit_key,
-            speaking=(
-                st.session_state.spirit_speaking
-                or st.session_state.voice_tts_speaking
-            ),
+            speaking=st.session_state.voice_tts_speaking,
         )
         col_spirit1, col_spirit2 = st.columns([3, 1])
         with col_spirit2:
@@ -1581,9 +1577,10 @@ else:
                 voice_event["conversation_mode"]
             )
         if "tts_speaking" in voice_event:
-            st.session_state.voice_tts_speaking = bool(
-                voice_event["tts_speaking"]
-            )
+            tts_speaking = bool(voice_event["tts_speaking"])
+            if tts_speaking != st.session_state.voice_tts_speaking:
+                st.session_state.voice_tts_speaking = tts_speaking
+                st.rerun()
         if (
             voice_event.get("reply_done")
             and voice_event["reply_done"] == st.session_state.voice_reply_id
@@ -1638,10 +1635,6 @@ if user_input:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Activate spirit speaking state
-        if st.session_state.spirit_key:
-            st.session_state.spirit_speaking = True
-
         recent_messages = st.session_state.messages[-20:]
 
         with st.chat_message("assistant"):
@@ -1676,10 +1669,6 @@ if user_input:
                     st.session_state.voice_notice = get_error_message(exc)
                 else:
                     st.error(get_error_message(exc))
-            finally:
-                # Return spirit to idle after response
-                st.session_state.spirit_speaking = False
-
 if used_voice:
     st.session_state.voice_reply_id = voice_event_id
     st.rerun()
