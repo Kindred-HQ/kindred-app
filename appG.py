@@ -44,16 +44,16 @@ st.markdown(
         margin: 0 0 1rem 0;
     }
     .kindred-flame {
-        width: 48px;
-        height: 52px;
-        flex: 0 0 48px;
+        width: 96px;
+        height: 104px;
+        flex: 0 0 96px;
         position: relative;
     }
     .kindred-flame img {
         position: absolute;
         inset: 0;
-        width: 48px;
-        height: 52px;
+        width: 96px;
+        height: 104px;
         object-fit: contain;
     }
     .kindred-flame-base {
@@ -69,11 +69,13 @@ st.markdown(
         font-style: italic;
         font-size: 4.2rem;
         color: #6A44AA;
+        -webkit-text-stroke: 1px rgba(255, 255, 255, 0.8);
         text-shadow:
-            0 0 12px #B894E8,
-            0 0 24px #D4B8F0,
-            0 0 36px #E6D4F8;
-        margin-left: 16px;
+            0 0 3px #fff,
+            0 0 8px rgba(255, 255, 255, 0.95),
+            0 0 16px #D4B8F0,
+            0 0 30px #E6D4F8;
+        margin-left: -4px;
         vertical-align: middle;
     }
     .stApp,
