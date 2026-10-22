@@ -68,6 +68,7 @@
     <select id="voice" aria-label="Reply voice">
       <option value="">System default</option>
     </select>
+    <button id="stop-speaking" type="button" disabled>Stop speaking</button>
     <p id="privacy">When enabled, the microphone listens for “Hey Kindred” while this tab is active. Browser speech recognition may process audio using your browser’s speech service. Kindred does not store microphone audio.</p>
     <p id="error" role="alert"></p>
   </div>
@@ -94,10 +95,13 @@
       let lastSpeechAt = 0;
       let waitingForReply = false;
       let lastReplyId = "";
+      let lastReplayId = "";
       let conversationMode = false;
       let lastActivityAt = 0;
       let selectedVoice = "";
       let availableVoices = [];
+      let currentSpeechFinish = null;
+      let isSpeaking = false;
 
       function send(value) {
         window.parent.postMessage({
@@ -111,9 +115,20 @@
         send({
           listening: enabled,
           conversation_mode: conversationMode,
+          tts_speaking: isSpeaking,
           selected_voice: selectedVoice,
           ...extra
         });
+      }
+
+      function updateFrameHeight() {
+        const panel = document.querySelector(".voice-panel");
+        const height = Math.ceil(panel.getBoundingClientRect().bottom + window.scrollY + 8);
+        window.parent.postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setFrameHeight",
+          height
+        }, "*");
       }
 
       function updateStatus() {
@@ -121,8 +136,11 @@
         toggle.textContent = enabled ? "Stop listening" : "Start listening";
         toggle.disabled = Boolean(args.disabled) || !Recognition;
         voiceSelect.disabled = Boolean(args.disabled);
+        document.getElementById("stop-speaking").disabled = !isSpeaking;
         if (args.disabled) {
           status.textContent = "Voice is unavailable while messaging is paused.";
+        } else if (isSpeaking) {
+          status.textContent = "Kindred is speaking…";
         } else if (waitingForReply) {
           status.textContent = "Kindred is preparing your reply…";
         } else if (!Recognition) {
@@ -286,12 +304,28 @@
         const finish = () => {
           if (finished) return;
           finished = true;
+          if (currentSpeechFinish === finish) {
+            currentSpeechFinish = null;
+            isSpeaking = false;
+            sendState();
+            updateStatus();
+          }
           done();
         };
+        currentSpeechFinish = finish;
+        isSpeaking = true;
+        sendState();
+        updateStatus();
         utterance.onend = finish;
         utterance.onerror = finish;
         speech.speak(utterance);
       }
+
+      document.getElementById("stop-speaking").addEventListener("click", () => {
+        if (!isSpeaking || !speech) return;
+        speech.cancel();
+        if (currentSpeechFinish) currentSpeechFinish();
+      });
 
       function handleReply() {
         const replyId = String(args.reply_id || "");
@@ -303,6 +337,21 @@
           waitingForReply = false;
           expireConversationIfIdle();
           sendState({ reply_done: replyId });
+          updateStatus();
+          startRecognition();
+        });
+        updateStatus();
+      }
+
+      function handleReplay() {
+        const replayId = String(args.replay_id || "");
+        if (!replayId || replayId === lastReplayId) return;
+        lastReplayId = replayId;
+        waitingForReply = true;
+        stopRecognition();
+        speakReply(String(args.replay_text || ""), args.voice_speed, () => {
+          waitingForReply = false;
+          sendState({ replay_done: replayId });
           updateStatus();
           startRecognition();
         });
@@ -400,13 +449,16 @@
         refreshVoices();
         updateStatus();
         handleReply();
+        handleReplay();
         if (enabled && !waitingForReply) startRecognition();
-        window.parent.postMessage({
-          isStreamlitMessage: true,
-          type: "streamlit:setFrameHeight",
-          height: 112
-        }, "*");
+        requestAnimationFrame(updateFrameHeight);
       });
+
+      if ("ResizeObserver" in window) {
+        new ResizeObserver(updateFrameHeight).observe(document.querySelector(".voice-panel"));
+      } else {
+        window.addEventListener("resize", updateFrameHeight);
+      }
 
       if (speech) speech.addEventListener
         ? speech.addEventListener("voiceschanged", refreshVoices)
