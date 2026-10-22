@@ -1506,7 +1506,9 @@ if chat_capped:
 else:
     st.markdown(
         "🎤 **Voice** — turn on listening, say “Hey Kindred,” then speak. "
-        "Kindred sends your message after a short pause."
+        "After that, speak naturally without repeating the wake phrase. "
+        "Kindred sends each message after a short pause and returns to wake-word mode "
+        "after one minute without speech."
     )
 
 voice_event = {}
