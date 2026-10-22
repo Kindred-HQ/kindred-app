@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, sans-serif;
+    }
+    body {
+      margin: 0;
+      color: #242333;
+      background: transparent;
+      font-size: 14px;
+    }
+    .voice-panel {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 8px 0;
+    }
+    button, select {
+      font: inherit;
+      border: 1px solid rgba(74, 52, 119, 0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #332354;
+      background: rgba(255, 255, 255, 0.45);
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button[aria-pressed="true"] {
+      color: white;
+      background: #6a44aa;
+    }
+    button:disabled, select:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #status {
+      min-width: 190px;
+      flex: 1;
+    }
+    #privacy {
+      flex-basis: 100%;
+      margin: 0;
+      color: #514b65;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    #error {
+      flex-basis: 100%;
+      margin: 0;
+      color: #8a1c1c;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="voice-panel">
+    <button id="toggle" type="button" aria-pressed="false">Start listening</button>
+    <span id="status" role="status" aria-live="polite">Listening is off.</span>
+    <label for="voice">Reply voice</label>
+    <select id="voice" aria-label="Reply voice">
+      <option value="">System default</option>
+    </select>
+    <p id="privacy">When enabled, the microphone listens for “Hey Kindred” while this tab is active. Browser speech recognition may process audio using your browser’s speech service. Kindred does not store microphone audio.</p>
+    <p id="error" role="alert"></p>
+  </div>
+  <script>
+    (() => {
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const toggle = document.getElementById("toggle");
+      const status = document.getElementById("status");
+      const voiceSelect = document.getElementById("voice");
+      const error = document.getElementById("error");
+      const speech = window.speechSynthesis;
+      let args = {};
+      let initialized = false;
+      let enabled = false;
+      let hidden = document.visibilityState !== "visible";
+      let recognition = null;
+      let recognizing = false;
+      let restartTimer = null;
+      let sessionTranscript = "";
+      let sessionBase = "";
+      let pendingText = "";
+      let wakeDetected = false;
+      let wakeAt = 0;
+      let lastSpeechAt = 0;
+      let waitingForReply = false;
+      let lastReplyId = "";
+      let selectedVoice = "";
+      let availableVoices = [];
+
+      function send(value) {
+        window.parent.postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setComponentValue",
+          value
+        }, "*");
+      }
+
+      function sendState(extra = {}) {
+        send({
+          listening: enabled,
+          selected_voice: selectedVoice,
+          ...extra
+        });
+      }
+
+      function updateStatus() {
+        toggle.setAttribute("aria-pressed", String(enabled));
+        toggle.textContent = enabled ? "Stop listening" : "Start listening";
+        toggle.disabled = Boolean(args.disabled) || !Recognition;
+        voiceSelect.disabled = Boolean(args.disabled);
+        if (args.disabled) {
+          status.textContent = "Voice is unavailable while messaging is paused.";
+        } else if (waitingForReply) {
+          status.textContent = "Kindred is preparing your reply…";
+        } else if (!Recognition) {
+          status.textContent = "Voice recognition is not supported by this browser.";
+        } else if (!enabled) {
+          status.textContent = "Listening is off.";
+        } else if (wakeDetected) {
+          status.textContent = pendingText
+            ? "I’m listening — pause when you’re finished."
+            : "I heard you — go ahead.";
+        } else {
+          status.textContent = "Listening for “Hey Kindred”…";
+        }
+      }
+
+      function stopRecognition() {
+        if (restartTimer) {
+          clearTimeout(restartTimer);
+          restartTimer = null;
+        }
+        if (recognition && recognizing) {
+          recognition.stop();
+        }
+      }
+
+      function resetUtterance() {
+        sessionTranscript = "";
+        sessionBase = "";
+        pendingText = "";
+        wakeDetected = false;
+        wakeAt = 0;
+        lastSpeechAt = 0;
+      }
+
+      function startRecognition() {
+        if (!enabled || hidden || waitingForReply || args.disabled || !Recognition || recognizing) {
+          return;
+        }
+        error.textContent = "";
+        if (!recognition) {
+          recognition = new Recognition();
+          recognition.lang = "en-ZA";
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.onstart = () => {
+            recognizing = true;
+            sessionTranscript = "";
+            sessionBase = pendingText;
+            updateStatus();
+          };
+          recognition.onresult = (event) => {
+            const transcript = Array.from(event.results)
+              .map((result) => result[0].transcript)
+              .join(" ")
+              .trim();
+            if (!transcript || transcript === sessionTranscript) return;
+            sessionTranscript = transcript;
+
+            const wakePattern = /\bhey[\s,.-]*kindred\b/i;
+            const wakeMatch = transcript.match(wakePattern);
+            if (!wakeDetected && wakeMatch) {
+              wakeDetected = true;
+              wakeAt = Date.now();
+              const afterWake = transcript
+                .slice(wakeMatch.index + wakeMatch[0].length)
+                .replace(/^[\s,.:;!?-]+/, "")
+                .trim();
+              pendingText = afterWake;
+              sessionBase = "";
+              if (afterWake) lastSpeechAt = Date.now();
+            } else if (wakeDetected) {
+              const withoutWake = transcript
+                .replace(wakePattern, "")
+                .replace(/^[\s,.:;!?-]+/, "")
+                .trim();
+              pendingText = [sessionBase, withoutWake].filter(Boolean).join(" ").trim();
+              if (pendingText) lastSpeechAt = Date.now();
+            }
+            updateStatus();
+          };
+          recognition.onerror = (event) => {
+            if (event.error === "no-speech" || event.error === "aborted") return;
+            error.textContent = event.error === "not-allowed" || event.error === "service-not-allowed"
+              ? "Microphone access was denied. Allow microphone access in your browser and try again."
+              : event.error === "audio-capture"
+                ? "No microphone was found. Connect a microphone and try again."
+                : `Speech recognition error: ${event.error}.`;
+            if (event.error === "not-allowed" || event.error === "service-not-allowed" || event.error === "audio-capture") {
+              enabled = false;
+              stopRecognition();
+              sendState({ error: error.textContent });
+            }
+            updateStatus();
+          };
+          recognition.onend = () => {
+            recognizing = false;
+            if (enabled && !hidden && !waitingForReply && !args.disabled) {
+              restartTimer = setTimeout(startRecognition, 250);
+            }
+          };
+        }
+        try {
+          recognition.start();
+        } catch (startError) {
+          if (startError.name === "NotAllowedError" || startError.name === "SecurityError") {
+            enabled = false;
+            error.textContent = "Microphone access is unavailable. Check your browser permissions and use a secure connection.";
+            sendState({ error: error.textContent });
+          } else if (startError.name !== "InvalidStateError") {
+            error.textContent = "Could not start speech recognition. Please try again.";
+          }
+          updateStatus();
+        }
+      }
+
+      function submitUtterance() {
+        const text = pendingText.trim();
+        if (!text || waitingForReply) return;
+        waitingForReply = true;
+        resetUtterance();
+        stopRecognition();
+        updateStatus();
+        sendState({
+          transcript: text,
+          event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        });
+      }
+
+      function chooseVoice(utterance) {
+        if (!speech) return;
+        const voices = speech.getVoices();
+        utterance.voice = voices.find((voice) => voice.name === selectedVoice)
+          || voices.find((voice) => voice.lang.toLowerCase() === "en-za")
+          || voices.find((voice) => voice.lang.toLowerCase().startsWith("en-"))
+          || null;
+      }
+
+      function speakReply(text, speed, done) {
+        if (!speech || !text) {
+          done();
+          return;
+        }
+        speech.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "en-ZA";
+        utterance.rate = Number(speed) || 1;
+        chooseVoice(utterance);
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          done();
+        };
+        utterance.onend = finish;
+        utterance.onerror = finish;
+        speech.speak(utterance);
+      }
+
+      function handleReply() {
+        const replyId = String(args.reply_id || "");
+        if (!replyId || replyId === lastReplyId) return;
+        lastReplyId = replyId;
+        waitingForReply = true;
+        stopRecognition();
+        speakReply(String(args.reply_text || ""), args.voice_speed, () => {
+          waitingForReply = false;
+          sendState({ reply_done: replyId });
+          updateStatus();
+          startRecognition();
+        });
+        updateStatus();
+      }
+
+      function refreshVoices() {
+        if (!speech) return;
+        availableVoices = speech.getVoices();
+        const previous = selectedVoice;
+        voiceSelect.replaceChildren(new Option("System default", ""));
+        for (const voice of availableVoices) {
+          voiceSelect.add(new Option(`${voice.name} (${voice.lang})`, voice.name));
+        }
+        if (availableVoices.some((voice) => voice.name === previous)) {
+          voiceSelect.value = previous;
+        } else if (!previous) {
+          voiceSelect.value = "";
+        }
+      }
+
+      toggle.addEventListener("click", () => {
+        if (args.disabled || !Recognition) return;
+        enabled = !enabled;
+        error.textContent = "";
+        if (enabled) {
+          resetUtterance();
+          startRecognition();
+        } else {
+          waitingForReply = false;
+          resetUtterance();
+          stopRecognition();
+        }
+        sendState();
+        updateStatus();
+      });
+
+      voiceSelect.addEventListener("change", () => {
+        selectedVoice = voiceSelect.value;
+        sendState();
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        hidden = document.visibilityState !== "visible";
+        if (hidden && enabled) {
+          enabled = false;
+          waitingForReply = false;
+          resetUtterance();
+          stopRecognition();
+          sendState({ error: "Listening stopped because this tab became inactive. Turn it on again when you return." });
+        }
+        updateStatus();
+      });
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || message.type !== "streamlit:render") return;
+        args = message.args || {};
+        if (!initialized) {
+          initialized = true;
+          enabled = Boolean(args.listening);
+          selectedVoice = String(args.selected_voice || "");
+        } else if (Boolean(args.listening) !== enabled) {
+          enabled = Boolean(args.listening);
+          if (!enabled) {
+            waitingForReply = false;
+            resetUtterance();
+            stopRecognition();
+          }
+        }
+        refreshVoices();
+        updateStatus();
+        handleReply();
+        if (enabled && !waitingForReply) startRecognition();
+        window.parent.postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setFrameHeight",
+          height: 112
+        }, "*");
+      });
+
+      if (speech) speech.addEventListener
+        ? speech.addEventListener("voiceschanged", refreshVoices)
+        : speech.onvoiceschanged = refreshVoices;
+
+      setInterval(() => {
+        if (wakeDetected && !pendingText && Date.now() - wakeAt > 10000) {
+          resetUtterance();
+          updateStatus();
+        } else if (wakeDetected && pendingText && lastSpeechAt && Date.now() - lastSpeechAt >= 2500) {
+          submitUtterance();
+        }
+      }, 200);
+
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:componentReady",
+        apiVersion: 1
+      }, "*");
+    })();
+  </script>
+</body>
+</html>
