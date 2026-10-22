@@ -33,6 +33,9 @@ BRAND_LOGO_BASE64 = base64.b64encode(BRAND_LOGO_PATH.read_bytes()).decode("ascii
 st.set_page_config(page_title="Kindred", page_icon=BRAND_LOGO, layout="centered")
 st.markdown(
     """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
     <style>
     .kindred-brand {
         display: flex;
@@ -61,11 +64,17 @@ st.markdown(
         mask-image: linear-gradient(to top, transparent 32%, rgba(0, 0, 0, 0.35) 48%, black 76%);
         -webkit-mask-image: linear-gradient(to top, transparent 32%, rgba(0, 0, 0, 0.35) 48%, black 76%);
     }
-    .kindred-brand span {
-        color: #242333;
-        font-size: 2.6rem;
-        font-weight: 650;
-        line-height: 1.15;
+    .kindred-title {
+        font-family: 'Lora', serif;
+        font-style: italic;
+        font-size: 4.2rem;
+        color: #6A44AA;
+        text-shadow:
+            0 0 12px #B894E8,
+            0 0 24px #D4B8F0,
+            0 0 36px #E6D4F8;
+        margin-left: 16px;
+        vertical-align: middle;
     }
     .stApp,
     [data-testid="stAppViewContainer"] {
@@ -123,7 +132,7 @@ def render_brand_header() -> None:
                 <img class="kindred-flame-base" src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" />
                 <img class="kindred-flame-flow" src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" aria-hidden="true" />
             </div>
-            <span>Kindred</span>
+            <span class="kindred-title">Kindred</span>
         </div>
         """,
         unsafe_allow_html=True,
