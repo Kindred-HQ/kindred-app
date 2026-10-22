@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+from pathlib import Path
 import random
 import statistics
 from datetime import datetime, timedelta, timezone
@@ -25,10 +26,37 @@ from supabase import create_client, Client
 # ==========================================
 # PAGE SETUP
 # ==========================================
-st.set_page_config(page_title="Kindred", page_icon="🕊️", layout="centered")
+BRAND_LOGO_PATH = Path(__file__).with_name("kindred-whisper.png")
+BRAND_LOGO = Image.open(BRAND_LOGO_PATH).convert("RGBA")
+BRAND_LOGO_BASE64 = base64.b64encode(BRAND_LOGO_PATH.read_bytes()).decode("ascii")
+
+st.set_page_config(page_title="Kindred", page_icon=BRAND_LOGO, layout="centered")
 st.markdown(
     """
     <style>
+    @keyframes kindred-whisper-flame {
+        0%, 100% { transform: translateY(1px) rotate(-2deg) scale(0.98); }
+        50% { transform: translateY(-3px) rotate(2deg) scale(1.04); }
+    }
+    .kindred-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 0 1rem 0;
+    }
+    .kindred-brand img {
+        width: 48px;
+        height: 52px;
+        object-fit: contain;
+        animation: kindred-whisper-flame 3.6s ease-in-out infinite;
+        filter: drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
+    }
+    .kindred-brand span {
+        color: #242333;
+        font-size: 2.6rem;
+        font-weight: 650;
+        line-height: 1.15;
+    }
     .stApp,
     [data-testid="stAppViewContainer"] {
         background-color: #b4b8f0;
@@ -50,6 +78,18 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+def render_brand_header() -> None:
+    st.markdown(
+        f"""
+        <div class="kindred-brand">
+            <img src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" />
+            <span>Kindred</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==========================================
@@ -759,7 +799,7 @@ def spirit_regeneration_days_remaining() -> int:
 # AUTH UI
 # ==========================================
 def render_auth():
-    st.title("🕊️ Kindred")
+    render_brand_header()
     st.markdown("##### A gentle space to say what's on your mind.")
     st.divider()
 
@@ -1276,7 +1316,7 @@ def premium_gate(feature_name: str):
 # ==========================================
 # HEADER
 # ==========================================
-st.title("🕊️ Kindred")
+render_brand_header()
 
 is_guest = st.session_state.user == "guest"
 free_remaining = remaining_free_messages()
