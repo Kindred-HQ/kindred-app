@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import html
 import io
 import json
@@ -69,7 +70,8 @@ def get_supabase_admin() -> Client:
     service_role_key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")
     if not service_role_key:
         raise RuntimeError(
-            "Add SUPABASE_SERVICE_ROLE_KEY to Streamlit secrets before creating a spirit."
+            "Add SUPABASE_SERVICE_ROLE_KEY to Streamlit secrets before using the "
+            "free message limit or creating a spirit."
         )
     return create_client(st.secrets["SUPABASE_URL"], service_role_key)
 
@@ -418,9 +420,7 @@ defaults = {
     "spirit_load_error": False,
     "spirit_speaking": False,  # true while Kindred is responding
     "show_questionnaire": False,
-    "guest_usage_id": None,
-    "usage_date": "",
-    "usage_count": 0,
+    "quota_error": "",
     "scroll_to_top_after_entry": False,
 }
 for key, val in defaults.items():
@@ -451,27 +451,13 @@ def _usage_today() -> str:
     return datetime.now(SAST).date().isoformat()
 
 
-@st.cache_resource
-def _usage_memory_store() -> dict:
-    """Process-level fallback so a refresh cannot reset the cap on this server."""
-    return {}
-
-
 def _client_ip() -> Optional[str]:
     try:
         ip = getattr(st.context, "ip_address", None)
         if ip:
             return str(ip)
-        headers = getattr(st.context, "headers", None)
-        if not headers:
-            return None
-        forwarded = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        real_ip = headers.get("X-Real-IP") or headers.get("x-real-ip")
-        if real_ip:
-            return str(real_ip)
     except Exception:
+        logging.exception("Could not read the Streamlit client IP")
         return None
     return None
 
@@ -481,32 +467,22 @@ def _usage_fingerprint() -> str:
     if user and user != "guest":
         return f"user:{user.id}"
 
-    salt = str(st.secrets.get("USAGE_FINGERPRINT_SALT", "kindred"))
+    # Use only Streamlit's server-provided IP; client-controlled headers/query params
+    # would let guests rotate their fingerprint and reset the daily limit.
+    salt = st.secrets.get("USAGE_FINGERPRINT_SALT")
+    if not salt or len(str(salt)) < 32:
+        raise RuntimeError(
+            "Set USAGE_FINGERPRINT_SALT in Streamlit secrets to a random value "
+            "at least 32 characters long to enforce guest limits."
+        )
     ip = _client_ip()
-    if ip:
-        digest = hashlib.sha256(f"{salt}|ip|{ip}".encode()).hexdigest()[:24]
-        return f"guest:{digest}"
-
-    if not st.session_state.guest_usage_id:
-        existing = None
-        try:
-            existing = st.query_params.get("kid")
-            if isinstance(existing, list):
-                existing = existing[0] if existing else None
-        except Exception:
-            existing = None
-        if existing:
-            st.session_state.guest_usage_id = str(existing)
-        else:
-            st.session_state.guest_usage_id = hashlib.sha256(
-                os.urandom(16)
-            ).hexdigest()[:24]
-            try:
-                st.query_params["kid"] = st.session_state.guest_usage_id
-            except Exception:
-                pass
-    digest = hashlib.sha256(
-        f"{salt}|sid|{st.session_state.guest_usage_id}".encode()
+    if not ip:
+        raise RuntimeError(
+            "Kindred could not identify this connection for the free message limit. "
+            "Please try again from a supported browser."
+        )
+    digest = hmac.new(
+        str(salt).encode(), f"ip|{ip}".encode(), hashlib.sha256
     ).hexdigest()[:24]
     return f"guest:{digest}"
 
@@ -524,53 +500,34 @@ def _parse_rpc_payload(data):
     return data if isinstance(data, dict) else None
 
 
-def _memory_usage_count(fingerprint: str) -> int:
-    store = _usage_memory_store()
-    return int(store.get(f"{fingerprint}:{_usage_today()}", 0))
-
-
-def _memory_consume(fingerprint: str, limit: int) -> tuple:
-    store = _usage_memory_store()
-    key = f"{fingerprint}:{_usage_today()}"
-    count = int(store.get(key, 0))
-    if count >= limit:
-        return False, count
-    count += 1
-    store[key] = count
-    return True, count
-
-
-def get_daily_usage_count() -> int:
+def get_daily_usage_count() -> Optional[int]:
     if st.session_state.is_premium:
         return 0
-    fingerprint = _usage_fingerprint()
-    today = _usage_today()
-    remote = None
     try:
-        result = supabase.rpc(
+        fingerprint = _usage_fingerprint()
+        result = get_supabase_admin().rpc(
             "get_daily_message_count", {"p_fingerprint": fingerprint}
         ).execute()
-        if result.data is not None:
-            remote = int(result.data)
+        if result.data is None:
+            raise RuntimeError("Supabase returned no daily usage count.")
+        count = int(result.data)
+        st.session_state.quota_error = ""
+        return count
     except Exception:
-        remote = None
-
-    memory = _memory_usage_count(fingerprint)
-    if st.session_state.get("usage_date") != today:
-        st.session_state.usage_date = today
-        st.session_state.usage_count = 0
-    combined = max(int(st.session_state.usage_count or 0), memory)
-    if remote is not None:
-        combined = max(combined, remote)
-        st.session_state.usage_count = combined
-        st.session_state.usage_date = today
-    return combined
+        logging.exception("Could not read the daily message quota")
+        st.session_state.quota_error = (
+            "Kindred could not check the free message limit. Please try again shortly."
+        )
+        return None
 
 
 def remaining_free_messages() -> Optional[int]:
     if st.session_state.is_premium:
         return None
-    return max(0, FREE_DAILY_MESSAGE_LIMIT - get_daily_usage_count())
+    count = get_daily_usage_count()
+    if count is None:
+        return None
+    return max(0, FREE_DAILY_MESSAGE_LIMIT - count)
 
 
 def consume_free_message() -> bool:
@@ -578,34 +535,36 @@ def consume_free_message() -> bool:
     if st.session_state.is_premium:
         return True
 
-    fingerprint = _usage_fingerprint()
-    limit = FREE_DAILY_MESSAGE_LIMIT
-    today = _usage_today()
-
     try:
-        result = supabase.rpc(
+        fingerprint = _usage_fingerprint()
+        result = get_supabase_admin().rpc(
             "consume_daily_message",
-            {"p_fingerprint": fingerprint, "p_limit": limit},
+            {"p_fingerprint": fingerprint, "p_limit": FREE_DAILY_MESSAGE_LIMIT},
         ).execute()
         payload = _parse_rpc_payload(result.data)
-        if payload is not None and "allowed" in payload:
-            count = int(payload.get("count") or 0)
-            allowed = bool(payload.get("allowed"))
-            st.session_state.usage_date = today
-            st.session_state.usage_count = count
-            _usage_memory_store()[f"{fingerprint}:{today}"] = count
-            return allowed
+        if payload is None or "allowed" not in payload or "count" not in payload:
+            raise RuntimeError("Supabase returned an invalid quota reservation.")
+        count = int(payload["count"])
+        allowed = bool(payload["allowed"])
+        st.session_state.quota_error = ""
+        return allowed
     except Exception:
-        pass
-
-    allowed, count = _memory_consume(fingerprint, limit)
-    st.session_state.usage_date = today
-    st.session_state.usage_count = count
-    return allowed
+        logging.exception("Could not reserve a daily message quota")
+        st.session_state.quota_error = (
+            "Kindred could not verify the free message limit. Please try again shortly."
+        )
+        return False
 
 
 def render_free_cap_notice() -> None:
     st.info(CAP_REACHED_MESSAGE)
+
+
+def render_quota_unavailable() -> None:
+    st.error(
+        st.session_state.quota_error
+        or "Kindred could not verify the free message limit. Please try again shortly."
+    )
 
 
 # ==========================================
@@ -646,8 +605,7 @@ def login(email: str, password: str):
                 st.session_state.spirit_image_processed = 3
             except Exception:
                 st.session_state.spirit_load_error = True
-        st.session_state.usage_date = ""
-        st.session_state.usage_count = 0
+        st.session_state.quota_error = ""
         st.session_state.auth_error = ""
         st.session_state.scroll_to_top_after_entry = True
         st.rerun()
@@ -678,12 +636,13 @@ def signup(email: str, password: str):
 
 def logout():
     supabase.auth.sign_out()
-    for key in ["user", "is_premium", "messages", "spirit_generated", "spirit_text",
-                "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
-            "guest_usage_id", "usage_date", "usage_count", "spirit_configuration",
-                "spirit_prompt", "spirit_style_seed", "spirit_image",
-                "spirit_image_processed",
-                "spirit_storage_path", "spirit_created_at", "spirit_load_error"]:
+    for key in [
+        "user", "is_premium", "messages", "spirit_generated", "spirit_text",
+        "auto_speak_text", "spirit_key", "spirit_speaking", "show_questionnaire",
+        "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
+        "spirit_image", "spirit_image_processed", "spirit_storage_path",
+        "spirit_created_at", "spirit_load_error",
+    ]:
         st.session_state[key] = defaults[key]
     st.rerun()
 
@@ -778,12 +737,11 @@ def render_auth():
     st.divider()
 
     st.markdown("**Continue without an account**")
-    st.caption("Free access — no sign-up needed. A usage ID helps enforce the daily limit.")
+    st.caption("Free access — no sign-up needed. Guest limit is per network IP.")
     if st.button("Enter as Guest", use_container_width=True):
         st.session_state.user = "guest"
         st.session_state.is_premium = False
-        st.session_state.usage_date = ""
-        st.session_state.usage_count = 0
+        st.session_state.quota_error = ""
         st.session_state.scroll_to_top_after_entry = True
         st.rerun()
 
@@ -1395,9 +1353,14 @@ for index, msg in enumerate(st.session_state.messages):
 # ==========================================
 # VOICE INPUT
 # ==========================================
-chat_capped = free_remaining is not None and free_remaining <= 0
+chat_capped = not st.session_state.is_premium and (
+    free_remaining is None or free_remaining <= 0
+)
 if chat_capped:
-    render_free_cap_notice()
+    if st.session_state.quota_error:
+        render_quota_unavailable()
+    else:
+        render_free_cap_notice()
 else:
     st.markdown("🎤 **Voice** — click Start, speak, click Stop when done")
 
@@ -1430,7 +1393,10 @@ if voice_transcript and not user_input:
 
 if user_input:
     if not consume_free_message():
-        render_free_cap_notice()
+        if st.session_state.quota_error:
+            render_quota_unavailable()
+        else:
+            render_free_cap_notice()
     else:
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
@@ -1509,7 +1475,10 @@ with st.expander("✨ Daily Kindred Whisper", expanded=False):
 
     if st.button("Receive Your Whisper", type="primary", use_container_width=True):
         if not consume_free_message():
-            render_free_cap_notice()
+            if st.session_state.quota_error:
+                render_quota_unavailable()
+            else:
+                render_free_cap_notice()
         else:
             whisper_prompt = (
                 f"Create a short, poetic message for someone who feels {vibe}, "
