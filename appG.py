@@ -516,6 +516,7 @@ defaults = {
     "voice_speed": 1.0,
     "voice_listening": False,
     "voice_name": "",
+    "voice_conversation_mode": False,
     "auto_speak_text": "",
     "voice_reply_id": "",
     "last_voice_event_id": "",
@@ -754,7 +755,8 @@ def logout():
     supabase.auth.sign_out()
     for key in [
         "user", "is_premium", "messages", "spirit_generated", "spirit_text",
-        "auto_speak_text", "voice_listening", "voice_name", "voice_reply_id",
+        "auto_speak_text", "voice_listening", "voice_name", "voice_conversation_mode",
+        "voice_reply_id",
         "last_voice_event_id", "voice_notice", "spirit_key", "spirit_speaking",
         "show_questionnaire",
         "quota_error", "spirit_configuration", "spirit_prompt", "spirit_style_seed",
@@ -1489,7 +1491,7 @@ else:
 for index, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg["role"] == "assistant":
+        if msg["role"] == "assistant" and st.session_state.is_premium:
             show_replay_button(
                 msg["content"],
                 st.session_state.voice_speed,
@@ -1509,7 +1511,7 @@ if chat_capped:
         render_quota_unavailable()
     else:
         render_free_cap_notice()
-else:
+elif st.session_state.is_premium:
     st.markdown(
         "🎤 **Voice** — turn on listening, say “Hey Kindred,” then speak. "
         "After that, speak naturally without repeating the wake phrase. "
@@ -1520,11 +1522,15 @@ else:
 voice_event = {}
 voice_transcript = None
 voice_event_id = ""
-if chat_capped:
+if not st.session_state.is_premium:
     st.session_state.voice_listening = False
+    st.session_state.voice_conversation_mode = False
+    st.session_state.auto_speak_text = ""
+    st.session_state.voice_notice = ""
 else:
     voice_event = kindred_voice_component(
         listening=st.session_state.voice_listening,
+        conversation_mode=st.session_state.voice_conversation_mode,
         disabled=False,
         selected_voice=st.session_state.voice_name,
         reply_id=st.session_state.voice_reply_id,
@@ -1538,6 +1544,10 @@ else:
             st.session_state.voice_listening = bool(voice_event["listening"])
         if "selected_voice" in voice_event:
             st.session_state.voice_name = str(voice_event["selected_voice"] or "")
+        if "conversation_mode" in voice_event:
+            st.session_state.voice_conversation_mode = bool(
+                voice_event["conversation_mode"]
+            )
         if (
             voice_event.get("reply_done")
             and voice_event["reply_done"] == st.session_state.voice_reply_id
@@ -1606,12 +1616,13 @@ if user_input:
                 if full_response.strip():
                     response_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    show_replay_button(
-                        full_response,
-                        st.session_state.voice_speed,
-                        "latest",
-                        st.session_state.voice_name,
-                    )
+                    if st.session_state.is_premium:
+                        show_replay_button(
+                            full_response,
+                            st.session_state.voice_speed,
+                            "latest",
+                            st.session_state.voice_name,
+                        )
                     if used_voice:
                         st.session_state.auto_speak_text = full_response
                 else:
@@ -1643,16 +1654,17 @@ if used_voice:
 # ==========================================
 st.divider()
 
-with st.expander("🔊 Voice Settings"):
-    st.session_state.voice_speed = st.slider(
-        "Speaking Speed",
-        min_value=0.5,
-        max_value=1.5,
-        value=float(st.session_state.voice_speed),
-        step=0.1,
-        key="voice_speed_slider",
-    )
-    st.info("Click 🔊 Replay under any message to hear it again.")
+if st.session_state.is_premium:
+    with st.expander("🔊 Voice Settings"):
+        st.session_state.voice_speed = st.slider(
+            "Speaking Speed",
+            min_value=0.5,
+            max_value=1.5,
+            value=float(st.session_state.voice_speed),
+            step=0.1,
+            key="voice_speed_slider",
+        )
+        st.info("Click 🔊 Replay under any message to hear it again.")
 
 with st.expander("✨ Daily Kindred Whisper", expanded=False):
     st.markdown("Take a moment. Breathe. Answer from your heart — there's no right or wrong.")
