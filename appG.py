@@ -44,7 +44,7 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 0;
-        margin: 0 0 1rem 0;
+        margin: 0;
     }
     .kindred-flame {
         width: 96px;
@@ -1047,13 +1047,15 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         align-items: center;
         justify-content: center;
         background: transparent;
-        padding: 8px 0 4px 0;
-        margin-bottom: 4px;
-        position: relative;
+        padding: 0;
+        margin: 0;
+        position: sticky;
+        top: 0;
+        z-index: 5;
     }}
     .spirit-media {{
-        width: 300px;
-        height: 300px;
+        width: 250px;
+        height: 250px;
         object-fit: cover;
         border-radius: 50%;
         mask-image: radial-gradient(circle closest-side, black 75%, transparent 100%);
@@ -1080,13 +1082,13 @@ def render_spirit(spirit_key: str, speaking: bool = False):
         font-size: 10px;
         letter-spacing: 3px;
         text-transform: uppercase;
-        margin-top: 12px;
+        margin-top: 6px;
         font-family: Georgia, serif;
     }}
     .spirit-status {{
         color: rgba(255,255,255,0.2);
         font-size: 10px;
-        margin-top: 4px;
+        margin-top: 2px;
         letter-spacing: 1px;
         font-style: italic;
     }}
@@ -1143,7 +1145,7 @@ def render_spirit(spirit_key: str, speaking: bool = False):
     </div>
     """
 
-    st.components.v1.html(html_content, height=360)
+    st.html(html_content)
 
 
 # ==========================================
@@ -1281,10 +1283,16 @@ def show_replay_button(
     voice_json = _json_for_script(voice_name)
     st.components.v1.html(f"""
     <div id="kr-{key}">
-      <button onclick="(function(){{
+      <button data-playing="false" onclick="(function(button){{
         if (!('speechSynthesis' in window)) return;
-        var u = new SpeechSynthesisUtterance({text_json});
-        var voiceName = {voice_json};
+    if (button.dataset.playing === 'true') {{
+      window.speechSynthesis.cancel();
+      button.dataset.playing = 'false';
+      button.textContent = '🔊 Replay';
+      return;
+    }}
+    var u = new SpeechSynthesisUtterance({text_json});
+    var voiceName = {voice_json};
         u.lang = 'en-ZA';
         u.rate = {float(speed)};
         var voices = window.speechSynthesis.getVoices();
@@ -1293,8 +1301,14 @@ def show_replay_button(
           || voices.find(function(v) {{ return v.lang.toLowerCase().indexOf('en-') === 0; }})
           || null;
         window.speechSynthesis.cancel();
+        button.dataset.playing = 'true';
+        button.textContent = '⏹ Stop';
+        u.onend = u.onerror = function() {{
+          button.dataset.playing = 'false';
+          button.textContent = '🔊 Replay';
+        }};
         window.speechSynthesis.speak(u);
-      }})()"
+      }})(this)"
         style="background:transparent;border:0;color:#aaa;cursor:pointer;
                font-size:12px;padding:2px 4px;">
         🔊 Replay
@@ -1385,26 +1399,26 @@ def premium_gate(feature_name: str):
 # ==========================================
 # HEADER
 # ==========================================
-render_brand_header()
-
 is_guest = st.session_state.user == "guest"
 free_remaining = remaining_free_messages()
-col_status, col_logout = st.columns([4, 1])
-with col_status:
-    if is_guest:
-        st.caption("👤 Guest — free access")
-    elif st.session_state.is_premium:
-        st.caption(f"✨ Premium — {st.session_state.user.email}")
-    else:
-        st.caption(f"🤍 Free — {st.session_state.user.email}")
-    if free_remaining is not None:
-        st.caption(
-            f"{free_remaining} of {FREE_DAILY_MESSAGE_LIMIT} free messages left today "
-            "(resets at midnight SAST)."
-        )
+col_brand, col_logout = st.columns([4, 1], vertical_alignment="center")
+with col_brand:
+    render_brand_header()
 with col_logout:
     if st.button("Log out" if not is_guest else "Exit", use_container_width=True):
         logout()
+
+if is_guest:
+    st.caption("👤 Guest — free access")
+elif st.session_state.is_premium:
+    st.caption(f"✨ Premium — {st.session_state.user.email}")
+else:
+    st.caption(f"🤍 Free — {st.session_state.user.email}")
+if free_remaining is not None:
+    st.caption(
+        f"{free_remaining} of {FREE_DAILY_MESSAGE_LIMIT} free messages left today "
+        "(resets at midnight SAST)."
+    )
 
 
 # ==========================================
