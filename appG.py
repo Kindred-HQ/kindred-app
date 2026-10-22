@@ -37,14 +37,29 @@ st.markdown(
     .kindred-brand {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 0;
         margin: 0 0 1rem 0;
     }
-    .kindred-brand img {
+    .kindred-flame {
+        width: 48px;
+        height: 52px;
+        flex: 0 0 48px;
+        position: relative;
+    }
+    .kindred-flame img {
+        position: absolute;
+        inset: 0;
         width: 48px;
         height: 52px;
         object-fit: contain;
-        filter: url(#kindred-whisper-flow) drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
+    }
+    .kindred-flame-base {
+        filter: drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
+    }
+    .kindred-flame-flow {
+        filter: url(#kindred-whisper-flow);
+        mask-image: linear-gradient(to top, transparent 32%, rgba(0, 0, 0, 0.35) 48%, black 76%);
+        -webkit-mask-image: linear-gradient(to top, transparent 32%, rgba(0, 0, 0, 0.35) 48%, black 76%);
     }
     .kindred-brand span {
         color: #242333;
@@ -104,7 +119,10 @@ def render_brand_header() -> None:
     st.markdown(
         f"""
         <div class="kindred-brand">
-            <img src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" />
+            <div class="kindred-flame">
+                <img class="kindred-flame-base" src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" />
+                <img class="kindred-flame-flow" src="data:image/png;base64,{BRAND_LOGO_BASE64}" alt="" aria-hidden="true" />
+            </div>
             <span>Kindred</span>
         </div>
         """,
