@@ -19,7 +19,7 @@ from botocore.exceptions import ClientError
 from PIL import Image
 from PIL import ImageChops
 from PIL import ImageFilter
-from streamlit_mic_recorder import speech_to_text
+import streamlit.components.v1 as components
 from supabase import create_client, Client
 
 
@@ -29,6 +29,10 @@ from supabase import create_client, Client
 BRAND_LOGO_PATH = Path(__file__).with_name("kindred-whisper.png")
 BRAND_LOGO = Image.open(BRAND_LOGO_PATH).convert("RGBA")
 BRAND_LOGO_BASE64 = base64.b64encode(BRAND_LOGO_PATH.read_bytes()).decode("ascii")
+kindred_voice_component = components.declare_component(
+    "kindred_voice",
+    path=str(Path(__file__).with_name("kindred_voice")),
+)
 
 st.set_page_config(page_title="Kindred", page_icon=BRAND_LOGO, layout="centered")
 st.markdown(
@@ -505,7 +509,11 @@ defaults = {
     "spirit_generated": False,
     "spirit_text": "",
     "voice_speed": 1.0,
+    "voice_listening": False,
+    "voice_name": "",
     "auto_speak_text": "",
+    "voice_reply_id": "",
+    "last_voice_event_id": "",
     "user": None,
     "is_premium": False,
     "auth_view": "login",
