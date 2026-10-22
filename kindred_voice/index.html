@@ -94,6 +94,8 @@
       let lastSpeechAt = 0;
       let waitingForReply = false;
       let lastReplyId = "";
+      let conversationMode = false;
+      let lastActivityAt = 0;
       let selectedVoice = "";
       let availableVoices = [];
 
@@ -108,6 +110,7 @@
       function sendState(extra = {}) {
         send({
           listening: enabled,
+          conversation_mode: conversationMode,
           selected_voice: selectedVoice,
           ...extra
         });
@@ -130,6 +133,8 @@
           status.textContent = pendingText
             ? "I’m listening — pause when you’re finished."
             : "I heard you — go ahead.";
+        } else if (conversationMode) {
+          status.textContent = "Conversation mode — speak anytime. I’ll wait one minute after your last message.";
         } else {
           status.textContent = "Listening for “Hey Kindred”…";
         }
@@ -178,25 +183,35 @@
             if (!transcript || transcript === sessionTranscript) return;
             sessionTranscript = transcript;
 
-            const wakePattern = /\bhey[\s,.-]*kindred\b/i;
+            const wakePattern = /\b(?:hey|key)[\s,.-]*kindred\b/i;
             const wakeMatch = transcript.match(wakePattern);
-            if (!wakeDetected && wakeMatch) {
+            const now = Date.now();
+            if (!conversationMode && wakeMatch) {
+              conversationMode = true;
+              lastActivityAt = now;
               wakeDetected = true;
-              wakeAt = Date.now();
+              wakeAt = now;
               const afterWake = transcript
                 .slice(wakeMatch.index + wakeMatch[0].length)
                 .replace(/^[\s,.:;!?-]+/, "")
                 .trim();
               pendingText = afterWake;
               sessionBase = "";
-              if (afterWake) lastSpeechAt = Date.now();
-            } else if (wakeDetected) {
+              if (afterWake) lastSpeechAt = now;
+            } else if (conversationMode) {
+              if (!wakeDetected) {
+                wakeDetected = true;
+                wakeAt = now;
+              }
               const withoutWake = transcript
                 .replace(wakePattern, "")
                 .replace(/^[\s,.:;!?-]+/, "")
                 .trim();
               pendingText = [sessionBase, withoutWake].filter(Boolean).join(" ").trim();
-              if (pendingText) lastSpeechAt = Date.now();
+              if (pendingText) {
+                lastActivityAt = now;
+                lastSpeechAt = now;
+              }
             }
             updateStatus();
           };
@@ -286,11 +301,28 @@
         stopRecognition();
         speakReply(String(args.reply_text || ""), args.voice_speed, () => {
           waitingForReply = false;
+          expireConversationIfIdle();
           sendState({ reply_done: replyId });
           updateStatus();
           startRecognition();
         });
         updateStatus();
+      }
+
+      function expireConversationIfIdle() {
+        if (
+          conversationMode
+          && !waitingForReply
+          && lastActivityAt
+          && Date.now() - lastActivityAt >= 60000
+        ) {
+          conversationMode = false;
+          lastActivityAt = 0;
+          resetUtterance();
+          sendState();
+          return true;
+        }
+        return false;
       }
 
       function refreshVoices() {
@@ -316,6 +348,8 @@
           resetUtterance();
           startRecognition();
         } else {
+          conversationMode = false;
+          lastActivityAt = 0;
           waitingForReply = false;
           resetUtterance();
           stopRecognition();
@@ -333,6 +367,8 @@
         hidden = document.visibilityState !== "visible";
         if (hidden && enabled) {
           enabled = false;
+          conversationMode = false;
+          lastActivityAt = 0;
           waitingForReply = false;
           resetUtterance();
           stopRecognition();
@@ -348,6 +384,7 @@
         if (!initialized) {
           initialized = true;
           enabled = Boolean(args.listening);
+          conversationMode = Boolean(args.conversation_mode);
           selectedVoice = String(args.selected_voice || "");
         } else if (Boolean(args.listening) !== enabled) {
           enabled = Boolean(args.listening);
@@ -356,6 +393,9 @@
             resetUtterance();
             stopRecognition();
           }
+        }
+        if ("conversation_mode" in args) {
+          conversationMode = Boolean(args.conversation_mode);
         }
         refreshVoices();
         updateStatus();
@@ -373,11 +413,14 @@
         : speech.onvoiceschanged = refreshVoices;
 
       setInterval(() => {
+        const conversationExpired = expireConversationIfIdle();
         if (wakeDetected && !pendingText && Date.now() - wakeAt > 10000) {
           resetUtterance();
           updateStatus();
         } else if (wakeDetected && pendingText && lastSpeechAt && Date.now() - lastSpeechAt >= 2500) {
           submitUtterance();
+        } else if (conversationExpired) {
+          updateStatus();
         }
       }, 200);
 
