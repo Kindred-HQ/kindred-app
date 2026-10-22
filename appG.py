@@ -97,7 +97,7 @@ st.markdown(
                 <animate
                     attributeName="baseFrequency"
                     values="0.018 0.028;0.026 0.04;0.018 0.028"
-                    dur="4.5s"
+                    dur="3s"
                     repeatCount="indefinite"
                 />
             </feTurbulence>
