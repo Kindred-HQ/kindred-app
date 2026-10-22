@@ -21,7 +21,7 @@ Depending on how you use Kindred, the service may process or store:
 
 • Daily usage data: Supabase stores a daily message count and an identifier used to enforce free limits. For signed-in users this is based on the account ID. For guests, the app derives a pseudonymous identifier from the connection IP using a server-side secret; it does not store the raw IP in the usage table. Guest limits may be affected by shared networks or changes to your connection IP, so guest use is not fully anonymous.
 
-• Voice input: Listening mode is off until you turn it on. While it is on and the app tab is active, your browser's speech-recognition feature listens for the wake phrase and converts your speech to text. Processing of the audio may be subject to your browser or device provider's terms. Kindred does not store raw microphone audio; the resulting transcript is sent to Amazon Bedrock like typed messages. Listening stops when you turn it off or the app tab becomes inactive.
+• Voice input: Listening mode is off until you turn it on. While it is on and the app tab is active, your browser's speech-recognition feature listens for the wake phrase. After “Hey Kindred,” it accepts follow-up voice messages without requiring the wake phrase again, returning to wake-phrase mode after one minute without speech. Processing of the audio may be subject to your browser or device provider's terms. Kindred does not store raw microphone audio; the resulting transcript is sent to Amazon Bedrock like typed messages. Listening stops when you turn it off or the app tab becomes inactive.
 
 3. How We Use Your Information
 
