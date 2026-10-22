@@ -34,22 +34,24 @@ st.set_page_config(page_title="Kindred", page_icon=BRAND_LOGO, layout="centered"
 st.markdown(
     """
     <style>
-    @keyframes kindred-whisper-flame {
-        0%, 100% { transform: translateY(1px) rotate(-2deg) scale(0.98); }
-        50% { transform: translateY(-3px) rotate(2deg) scale(1.04); }
+    @keyframes kindred-whisper-drift {
+        0% { transform: translateY(1px) scale(1); }
+        30% { transform: translateY(-3px) scale(1.015); }
+        68% { transform: translateY(-7px) scale(1.035); }
+        100% { transform: translateY(1px) scale(1); }
     }
     .kindred-brand {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 4px;
         margin: 0 0 1rem 0;
     }
     .kindred-brand img {
         width: 48px;
         height: 52px;
         object-fit: contain;
-        animation: kindred-whisper-flame 3.6s ease-in-out infinite;
-        filter: drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
+        animation: kindred-whisper-drift 4.5s ease-in-out infinite;
+        filter: url(#kindred-whisper-flow) drop-shadow(0 0 3px rgba(255, 224, 177, 0.35));
     }
     .kindred-brand span {
         color: #242333;
@@ -75,6 +77,31 @@ st.markdown(
         background-color: #b4b8f0 !important;
     }
     </style>
+    <svg aria-hidden="true" width="0" height="0" style="position:absolute">
+        <filter id="kindred-whisper-flow" x="-15%" y="-15%" width="130%" height="130%">
+            <feTurbulence
+                type="fractalNoise"
+                baseFrequency="0.018 0.028"
+                numOctaves="2"
+                seed="7"
+                result="whisper-noise"
+            >
+                <animate
+                    attributeName="baseFrequency"
+                    values="0.018 0.028;0.026 0.04;0.018 0.028"
+                    dur="4.5s"
+                    repeatCount="indefinite"
+                />
+            </feTurbulence>
+            <feDisplacementMap
+                in="SourceGraphic"
+                in2="whisper-noise"
+                scale="4"
+                xChannelSelector="R"
+                yChannelSelector="G"
+            />
+        </filter>
+    </svg>
     """,
     unsafe_allow_html=True,
 )
