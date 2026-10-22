@@ -192,38 +192,50 @@ QUALITY_RULES = {
     "Safety": {"accent_detail": "centered, gently outward-wrapping flow"},
 }
 
-STYLE_SEED_RULES = {
-    "seed_01": {"global_style": "smooth minimal ethereal"},
-    "seed_02": {"global_style": "smoky, soft-blended ethereal"},
-    "seed_03": {"global_style": "crystalline, sharp-glow ethereal"},
-    "seed_04": {"global_style": "wispy delicate ethereal"},
-    "seed_05": {"global_style": "luminous radiant ethereal"},
+SHAPE_RULES = {
+    "Soft cloud": "a gathered, softly billowing cloud with rounded, layered smoke forms",
+    "Rising plume": "an upward-flowing plume with a luminous core and tapering wisps",
+    "Flowing ribbons": "several intertwined, translucent smoke trails curling in loose arcs",
+    "Branching form": "organic branching light-filaments with delicate vaporous offshoots",
+    "Swirling orbit": "asymmetrical eddies of smoke loosely circling a glowing center",
 }
 
-def build_spirit_prompt(elem, pace, strength, quality, seed_key):
+STYLE_SEED_RULES = {
+    "seed_01": {"global_style": "soft layered smoke and a concentrated inner glow"},
+    "seed_02": {"global_style": "fine luminous filaments woven through translucent vapor"},
+    "seed_03": {"global_style": "delicate sparkling particles gathered close to the spirit"},
+    "seed_04": {"global_style": "broad, flowing vapor curls with softly blurred edges"},
+    "seed_05": {"global_style": "subtle luminous gradients and intricate wispy detail"},
+}
+
+def build_spirit_prompt(elem, pace, strength, quality, shape, seed_key):
     try:
         element_rules = ELEMENT_RULES[elem]
         pace_rules = PACE_RULES[pace]
         strength_rules = STRENGTH_RULES[strength]
         quality_rules = QUALITY_RULES[quality]
+        shape_description = SHAPE_RULES[shape]
         style_rules = STYLE_SEED_RULES[seed_key]
     except KeyError as exc:
         raise ValueError(f"Unknown spirit design option: {exc.args[0]}") from exc
 
     return (
-        "Create a living, otherworldly spirit made from light, vapor, and energy, not a physical object.\n"
-        f"Abstract character: {element_rules['base_form']}, colored with {', '.join(element_rules['base_colors'])}. Suggest the element through color and motion, never as a literal object.\n"
-        f"Visible motion: {element_rules['base_movement']}, at {pace_rules['speed']}, with {pace_rules['motion_mod']}. Add fine trailing wisps, curling filaments, and drifting sparks so the energy feels alive.\n"
-        f"Texture and presence: {strength_rules['texture']}, {strength_rules['energy_tone']}. Keep the form translucent, softly layered, luminous, and irregular, with delicate edges that dissolve into the air.\n"
-        f"Accent: {quality_rules['accent_detail']}, expressed as flowing light rather than a solid shape.\n"
-        f"Style: {style_rules['global_style']}, dreamlike, atmospheric, and softly radiant.\n"
-        "Composition: a loose, asymmetrical, floating cloud of energy near the center, with tendrils and wisps extending naturally in different directions. No crisp outline, hard surface, geometric symmetry, or single ribbon-like silhouette. Keep the spirit luminous throughout with no black patches inside it; use pure black only as the empty background for transparency removal."
+        "Create one original, abstract ethereal spirit: a floating presence formed entirely from translucent swirling smoke, vapor, and glowing light. It must not resemble a person, creature, object, or recognizable symbol.\n"
+        f"Questionnaire design: {element_rules['base_form']}, using {', '.join(element_rules['base_colors'])}; suggest the element through color and motion, never as a literal flame, plant, water droplet, star icon, or other object. Form its silhouette as {shape_description}.\n"
+        f"Motion: {element_rules['base_movement']}, at {pace_rules['speed']}, with {pace_rules['motion_mod']}. Let several delicate smoke wisps and light-filaments curl organically from the main form, with tiny subtle sparks and sparkling particles close to the spirit.\n"
+        f"Presence: {strength_rules['texture']}, {strength_rules['energy_tone']}. Give it a luminous inner glow, translucent layered depth, softly blurred edges, and an irregular, naturally flowing silhouette. Express {quality_rules['accent_detail']} through the arrangement of light and vapor.\n"
+        f"Visual treatment: {style_rules['global_style']}; richly detailed yet soft, dreamlike, and otherworldly. The selected shape and element must remain clearly recognizable in the overall composition.\n"
+        "Isolated asset for a transparent-background cutout: show only the single spirit, centered and fully visible with comfortable clear margins, against a perfectly uniform pure black background. Use no environment, scenery, horizon, floor, reflection, atmospheric background haze, or cast shadow. Keep the spirit's interior luminous and colorful, not black; keep fine wisps distinct enough to separate from the background. Square composition.\n"
+        "Do not create a human or humanoid figure, face, eyes, body, wings, animal, plant, landscape, architecture, multiple spirits, split composition, symmetrical emblem, icon, logo, frame, border, text, watermark, or checkerboard pattern. No hard solid surfaces, sharp geometric outlines, or copied reference composition."
     )
 
 
 SPIRIT_NEGATIVE_PROMPT = (
-    "circle, border, frame, human, face, animal, text, lettering, typography, "
-    "icon, logo, multiple subjects"
+    "person, human, humanoid, face, eyes, body, hands, wings, animal, "
+    "plant, landscape, scenery, architecture, floor, reflection, background haze, "
+    "multiple spirits, split composition, symmetrical emblem, object, literal flame, "
+    "water droplet, star icon, circle, border, frame, hard outline, geometry, "
+    "text, lettering, typography, watermark, logo, icon, checkerboard"
 )
 
 
@@ -1054,6 +1066,13 @@ def render_questionnaire():
             label_visibility="collapsed",
         )
 
+        st.markdown("**What shape feels most like your spirit?**")
+        shape = st.selectbox(
+            "Your spirit's shape",
+            options=list(SHAPE_RULES),
+            label_visibility="collapsed",
+        )
+
         days_remaining = spirit_regeneration_days_remaining()
         if days_remaining:
             st.info(f"You can renew your spirit in {days_remaining} days.")
@@ -1080,10 +1099,11 @@ def render_questionnaire():
                 "pace": pace,
                 "strength": strength,
                 "quality": quality,
+                "shape": shape,
                 "style_seed": seed_key,
             }
             spirit_prompt = build_spirit_prompt(
-                element, pace, strength, quality, seed_key
+                element, pace, strength, quality, shape, seed_key
             )
             with st.spinner("Creating your spirit image..."):
                 try:
