@@ -1,7 +1,7 @@
 streamlit
 boto3
-streamlit-mic-recorder
 supabase
 openai
 pillow
+httpx>=0.27,<1
 replicate>=1.0.0
